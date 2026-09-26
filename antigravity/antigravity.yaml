@@ -4,20 +4,11 @@ author: "EdwardRegal"
 icon: https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/antigravity/antigravity.png
 
 scriptings:
-  # 1. 通用脚本（Generic）：生成原生 iOS 小组件 DSL
   - generic:
       name: "antigravity_quota_widget"
       script_url: https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/antigravity/antigravity_quota.js
       timeout: 30
 
-  # 2. 定时通知任务（Schedule）：每 2 小时后台巡检
-  - schedule:
-      name: "antigravity_quota_schedule"
-      cron: 0 0 */2 * * *
-      script_url: https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/antigravity/antigravity_quota.js
-      timeout: 30
-
 widgets:
-  # 注册到 Egern 小组件画廊并可在 iOS 桌面添加
   - name: "Antigravity 额度"
     script_name: "antigravity_quota_widget"
