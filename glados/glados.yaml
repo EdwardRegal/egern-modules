@@ -1,0 +1,23 @@
+name: "GLaDOS / Railgun 自动签到"
+description: "分别抓取两个站点的 Cookie，每日签到并按积分门槛自动兑换。"
+author: "Devilstore, adapted for Egern"
+icon: checkmark.seal.fill
+
+scriptings:
+  - http_request:
+      name: "GLaDOS / Railgun Cookie 抓取"
+      match: ^https?:\/\/(glados\.cloud|railgun\.info)\/api\/user\/(status|points|checkin)(?:[/?#]|$)
+      script_url: https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/glados/glados_cookie.js
+      body_required: false
+
+  - schedule:
+      name: "GLaDOS / Railgun 每日签到"
+      cron: 0 15 9 * * *
+      script_url: https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/glados/glados_task.js
+      timeout: 120
+
+mitm:
+  hostnames:
+    includes:
+      - glados.cloud
+      - railgun.info
