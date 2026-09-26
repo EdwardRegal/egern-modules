@@ -61,7 +61,7 @@ function nativeQuota(label, item, accent, small) {
       { type: 'spacer' }
     ] : [] };
   return { type: 'stack', direction: 'column', alignItems: 'start', gap: small ? 1 : 4, children: [
-    { type: 'stack', direction: 'row', alignItems: 'center', gap: 4,
+    { type: 'stack', direction: 'row', alignItems: 'center', width: trackWidth, gap: 4,
       children: [
         nativeText(label, small ? 9 : 11, COLOR.muted, 'semibold'),
         nativeText('重置 ' + item.resetText, small ? 8 : 9, COLOR.subtle),
