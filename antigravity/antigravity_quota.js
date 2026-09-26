@@ -1,3 +1,4 @@
+// ANTIGRAVITY QUOTA SCRIPT v2026.09.27-3
 /** Antigravity 配额 · Egern 自适应玻璃小组件
  * 小组件环境变量：REFRESH_TOKEN（也兼容 TOKEN / refresh_token）
  * 颜色随系统外观切换；渐变与透明层是玻璃视觉模拟，不是实时壁纸折射。
