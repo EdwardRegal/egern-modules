@@ -63,6 +63,7 @@ function nativeQuota(label, item, accent, small) {
     { type: 'stack', direction: 'row', alignItems: 'center', gap: 4,
       children: [
         nativeText(label, small ? 9 : 11, COLOR.muted, 'semibold'),
+        nativeText('重置 ' + item.resetText, small ? 8 : 9, COLOR.subtle),
         { type: 'spacer' },
         nativeText(percentText(value), small ? 11 : 16, color, 'bold')
       ] },
@@ -81,7 +82,7 @@ function nativeCard(title, data, accent, small) {
     children: [
       nativeText(title, small ? 11 : 12, COLOR.body, 'bold'),
       nativeQuota('5h', data.h5, accent, small),
-      nativeQuota('Weekly', data.weekly, accent, small)
+      nativeQuota('周', data.weekly, accent, small)
     ] };
 }
 

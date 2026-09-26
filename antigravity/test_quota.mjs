@@ -3,8 +3,8 @@ import quotaWidget from './antigravity_quota.js';
 
 const groups = [
   { displayName: 'Claude / 3P', buckets: [
-    { window: '5h', remainingFraction: 0 },
-    { window: 'weekly', remainingFraction: 0.42 }
+    { window: '5h', remainingFraction: 0, resetTime: new Date(Date.now() + 90 * 60000).toISOString() },
+    { window: 'weekly', remainingFraction: 0.42, resetTime: new Date(Date.now() + 2 * 86400000).toISOString() }
   ] },
   { displayName: 'Gemini', buckets: [
     { window: '5h', remainingFraction: 1 },
@@ -42,23 +42,33 @@ for (const family of ['systemSmall', 'systemMedium']) {
   checkColors(widget);
   const cards = family === 'systemSmall' ? widget.children.slice(1) : widget.children[1].children;
   assert.equal(cards.length, 2);
-  assert.deepEqual(cards.map(card => card.children.slice(1).map(row => row.children[0].children[2].text)),
+  assert.deepEqual(cards.map(card => card.children.slice(1).map(row => row.children[0].children[3].text)),
     [['0%', '42%'], ['100%', '19%']]);
-  for (const card of cards) for (const row of card.children.slice(1)) {
-    assert.equal(card.alignItems, 'start');
-    assert.equal(row.alignItems, 'start');
-    assert.equal(row.children[0].children[2].maxLines, 1);
-    const track = row.children[1];
-    assert.equal(track.height, family === 'systemSmall' ? 4 : 6);
-    assert.equal(track.width, family === 'systemSmall' ? 100 : 116);
-    assert.deepEqual(Object.keys(track.backgroundColor).sort(), ['dark', 'light']);
-    const value = Number.parseInt(row.children[0].children[2].text, 10);
-    assert.equal(track.children.length, value === 0 ? 0 : 2);
-    if (value > 0) {
-      assert.equal(track.children[0].width, track.width * value / 100);
-      assert.equal(track.children[0].height, track.height);
-      assert.equal(track.children[1].type, 'spacer');
-      assert.equal(track.children[1].length, undefined);
+  for (const [index, card] of cards.entries()) {
+    assert.deepEqual(card.children.slice(1).map(row => row.children[0].children[0].text), ['5h', '周']);
+    assert.equal(card.children[1].children[0].children[1].text.startsWith('重置 '), true);
+    assert.equal(card.children[2].children[0].children[1].text.startsWith('重置 '), true);
+    if (index === 0) {
+      assert.match(card.children[1].children[0].children[1].text, /^重置 1h 30m$/);
+      assert.match(card.children[2].children[0].children[1].text, /^重置 2d 0h$/);
+    } else {
+      assert.equal(card.children[1].children[0].children[1].text, '重置 —');
+    }
+    for (const row of card.children.slice(1)) {
+      assert.equal(card.alignItems, 'start');
+      assert.equal(row.alignItems, 'start');
+      assert.equal(row.children[0].children[3].maxLines, 1);
+      const track = row.children[1];
+      assert.equal(track.height, family === 'systemSmall' ? 4 : 6);
+      assert.equal(track.width, family === 'systemSmall' ? 100 : 116);
+      assert.deepEqual(Object.keys(track.backgroundColor).sort(), ['dark', 'light']);
+      const value = Number.parseInt(row.children[0].children[3].text, 10);
+      assert.equal(track.children.length, value === 0 ? 0 : 2);
+      if (value > 0) {
+        assert.equal(track.children[0].width, track.width * value / 100);
+        assert.equal(track.children[0].height, track.height);
+        assert.equal(track.children[1].type, 'spacer');
+      }
     }
   }
 }
@@ -77,9 +87,10 @@ assert.equal(fail.children.length, 3);
 checkColors(fail);
 const empty = await quotaWidget({ env: { REFRESH_TOKEN: 'stub-refresh-token' }, widgetFamily: 'systemMedium',
   http: { post: async url => ({ json: async () => url.includes('oauth2') ? { access_token: 'stub' } : { groups: [] } }) } });
-assert.deepEqual(empty.children[1].children.map(card => card.children.slice(1).map(row => row.children[0].children[2].text)),
+assert.deepEqual(empty.children[1].children.map(card => card.children.slice(1).map(row => row.children[0].children[3].text)),
   [['—', '—'], ['—', '—']]);
 for (const card of empty.children[1].children) for (const row of card.children.slice(1)) {
+  assert.equal(row.children[0].children[1].text, '重置 —');
   assert.equal(row.children[1].children.length, 0);
 }
 console.log('PASS: adaptive light/dark progress bars, small/medium quotas, errors, missing-data placeholders');
