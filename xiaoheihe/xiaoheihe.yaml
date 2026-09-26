@@ -1,7 +1,7 @@
 name: "小黑盒日常签到与任务"
 description: "小黑盒每日自动签到、做任务（分享/浏览榜单），以及自动抓取 Cookie 凭据。"
 author: "cjy, modified for Egern"
-icon: https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/xiaoheihe/XiaoHeiHe.png
+icon: https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/xiaoheihe/heybox.png
 
 scriptings:
   - http_request:
