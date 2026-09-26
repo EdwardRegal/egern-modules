@@ -3,24 +3,26 @@
  * Author: EdwardRegal
  * 
  * 环境变量（在小组件或脚本配置中设置）：
- * - REFRESH_TOKEN 或 TOKEN: Antigravity (Google OAuth) 的长效 refresh_token
- * 
- * 配置示例（在 Egern 脚本或 widgets 配置中）：
- * widgets:
- *   - name: "Antigravity 额度"
- *     script_name: "antigravity_quota_widget"
- *     env:
- *       REFRESH_TOKEN: "1//06jc..."
+ * - REFRESH_TOKEN: Google OAuth 长效 refresh_token
  */
 
 export default async function(ctx) {
-  // 1. 严格从环境变量 (ctx.env) 获取 refresh_token
-  const env = ctx.env || {};
-  const refreshToken = (env.REFRESH_TOKEN || env.TOKEN || env.refresh_token || '').trim();
+  // 1. 获取环境变量 REFRESH_TOKEN
+  const env = (ctx && ctx.env) || {};
+  let refreshToken = (env.REFRESH_TOKEN || env.TOKEN || env.refresh_token || '').trim();
 
-  // 若未在环境变量配置 Token，渲染提示卡片
+  // 兜底支持 argument / 传参
+  if (!refreshToken && ctx && ctx.argument) {
+    if (typeof ctx.argument === 'string') {
+      refreshToken = ctx.argument.trim();
+    } else if (typeof ctx.argument === 'object') {
+      refreshToken = (ctx.argument.REFRESH_TOKEN || ctx.argument.token || '').trim();
+    }
+  }
+
+  // 若未配置，渲染提示卡片（不发送任何系统通知）
   if (!refreshToken) {
-    return renderErrorWidget("未配置环境变量", "请在小组件/脚本环境变量中设置 REFRESH_TOKEN");
+    return renderErrorWidget("未配置 REFRESH_TOKEN", "请在小组件/脚本环境变量中配置");
   }
 
   try {
@@ -30,11 +32,11 @@ export default async function(ctx) {
     // 3. 获取配额数据
     const quotaData = await fetchQuotaSummary(ctx, accessToken);
 
-    // 4. 解析 Claude 与 Gemini 的 5h 与周额度
+    // 4. 解析 Claude 与 Gemini 的 5h 与周额度真实数据
     const parsed = parseQuotas(quotaData);
 
     // 5. 渲染 Canvas UI（适配 systemSmall 与 systemMedium）
-    const widgetFamily = ctx.widgetFamily || 'systemMedium';
+    const widgetFamily = (ctx && ctx.widgetFamily) || 'systemMedium';
     const isSmall = widgetFamily === 'systemSmall';
 
     const dataUri = await renderCanvasWidget(parsed, isSmall);
@@ -69,7 +71,8 @@ async function refreshAccessToken(ctx, refreshToken) {
     `grant_type=refresh_token`
   ].join('&');
 
-  const resp = await (ctx.http ? ctx.http.post : fetch)('https://oauth2.googleapis.com/token', {
+  const httpFunc = (ctx && ctx.http && ctx.http.post) ? ctx.http.post : fetch;
+  const resp = await httpFunc('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded'
@@ -85,10 +88,11 @@ async function refreshAccessToken(ctx, refreshToken) {
 }
 
 /**
- * 查询配额汇总 (仅提取汇总配额)
+ * 查询配额汇总
  */
 async function fetchQuotaSummary(ctx, accessToken) {
-  const resp = await (ctx.http ? ctx.http.post : fetch)('https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary', {
+  const httpFunc = (ctx && ctx.http && ctx.http.post) ? ctx.http.post : fetch;
+  const resp = await httpFunc('https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
@@ -106,17 +110,21 @@ async function fetchQuotaSummary(ctx, accessToken) {
 }
 
 /**
- * 解析配额分组（只取 Claude/3P 与 Gemini）
+ * 精确解析配额结构
+ * API 实际返回字段为 groups[].buckets[]
+ * - window: "5h" | "weekly"
+ * - remainingFraction: float (如 0.3748)
+ * - resetTime: ISO 字符串
  */
 function parseQuotas(data) {
-  const groups = data.quotaGroups || [];
+  const groups = data.groups || [];
   
   let claudeGroup = null;
   let geminiGroup = null;
 
   for (const g of groups) {
-    const name = (g.name || '').toLowerCase();
-    if (name.includes('claude') || name.includes('3p')) {
+    const name = (g.displayName || '').toLowerCase();
+    if (name.includes('claude') || name.includes('3p') || name.includes('gpt')) {
       claudeGroup = g;
     } else if (name.includes('gemini')) {
       geminiGroup = g;
@@ -130,7 +138,7 @@ function parseQuotas(data) {
 }
 
 function extractGroupQuota(group, defaultTitle) {
-  if (!group || !group.quotas) {
+  if (!group || !group.buckets) {
     return {
       title: defaultTitle,
       h5: { percent: 100, resetText: "—" },
@@ -141,15 +149,15 @@ function extractGroupQuota(group, defaultTitle) {
   let h5 = { percent: 100, resetText: "—" };
   let weekly = { percent: 100, resetText: "—" };
 
-  for (const q of group.quotas) {
-    const dur = (q.duration || '').toLowerCase();
-    const frac = q.remainingFraction != null ? q.remainingFraction : 1.0;
+  for (const b of group.buckets) {
+    const win = (b.window || '').toLowerCase();
+    const frac = b.remainingFraction != null ? b.remainingFraction : 1.0;
     const pct = Math.round(frac * 100);
-    const resetTime = q.resetTime ? formatResetTime(q.resetTime) : "—";
+    const resetTime = b.resetTime ? formatResetTime(b.resetTime) : "—";
 
-    if (dur.includes('18000s') || dur.includes('5h')) {
+    if (win === '5h' || win.includes('5')) {
       h5 = { percent: pct, resetText: resetTime };
-    } else if (dur.includes('604800s') || dur.includes('7d') || dur.includes('week')) {
+    } else if (win === 'weekly' || win.includes('week')) {
       weekly = { percent: pct, resetText: resetTime };
     }
   }
@@ -212,9 +220,6 @@ async function renderCanvasWidget(parsed, isSmall) {
   const MONO = '"SF Mono", Menlo, monospace';
 
   if (isSmall) {
-    // ----------------------------------------
-    // Small 尺寸 (180x180)
-    // ----------------------------------------
     cx.fillStyle = '#8e9aa8';
     cx.font = '600 12px ' + SYS;
     cx.textAlign = 'left';
@@ -230,9 +235,6 @@ async function renderCanvasWidget(parsed, isSmall) {
     drawCompactCard(cx, 16, 104, W - 32, 58, "Gemini", parsed.gemini, '#2563eb');
 
   } else {
-    // ----------------------------------------
-    // Medium 尺寸 (380x180)
-    // ----------------------------------------
     cx.fillStyle = '#8e9aa8';
     cx.font = '600 13px ' + SYS;
     cx.textAlign = 'left';
@@ -402,7 +404,7 @@ function roundRectTop(cx, x, y, w, h, r) {
 
 function roundRectLeft(cx, x, y, w, h, r) {
   cx.beginPath();
-  cx.moveTo(x + r, y);
+  cx.moveTo(x, y + r);
   cx.arcTo(x, y, x + w, y, r);
   cx.lineTo(x + w, y);
   cx.lineTo(x + w, y + h);
