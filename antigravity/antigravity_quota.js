@@ -1,6 +1,6 @@
-/** Antigravity 配额 · Egern 小组件（Canvas 液态玻璃视觉）
+/** Antigravity 配额 · Egern 自适应玻璃小组件
  * 小组件环境变量：REFRESH_TOKEN（也兼容 TOKEN / refresh_token）
- * 说明：Canvas 中的玻璃高光是视觉模拟；iOS 壁纸实时折射须由系统原生材质提供。
+ * 颜色随系统外观切换；渐变与透明层是玻璃视觉模拟，不是实时壁纸折射。
  */
 export default async function (ctx) {
   const env = (ctx && ctx.env) || {};
@@ -19,19 +19,25 @@ export default async function (ctx) {
       error = ['配额获取失败', String(e && (e.message || e) || '未知错误')];
     }
   }
-  try {
-    return {
-      type: 'widget',
-      refreshAfter: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-      backgroundImage: await renderWidget(data, small, error),
-      padding: 0,
-      children: []
-    };
-  } catch (e) {
-    // Some Egern widget runtimes have no OffscreenCanvas; keep the quota visible.
-    return nativeWidget(data, small, error);
-  }
+  return nativeWidget(data, small, error);
 }
+
+const adaptive = (light, dark) => ({ light, dark });
+const COLOR = {
+  title: adaptive('#344665', '#dbe8f8'),
+  body: adaptive('#233952', '#f2f6ff'),
+  muted: adaptive('#465d78', '#b4c8e3'),
+  subtle: adaptive('#526681', '#a8bfdc'),
+  error: adaptive('#a93450', '#ff96ac'),
+  unknown: adaptive('#8493a9', '#a7bbd6'),
+  low: adaptive('#d64c61', '#ff788e'),
+  mid: adaptive('#ad7420', '#ffc577'),
+  claude: adaptive('#b4593e', '#ffc19d'),
+  gemini: adaptive('#3566cc', '#92b9ff')
+};
+const GRADIENT_POINTS = {
+  startPoint: { x: 0, y: 0 }, endPoint: { x: 1, y: 1 }
+};
 
 function nativeText(value, size, color, weight = 'medium') {
   return { type: 'text', text: String(value), font: { size, weight },
@@ -39,43 +45,50 @@ function nativeText(value, size, color, weight = 'medium') {
 }
 
 function nativeQuota(label, item, accent) {
+  const value = item.percent;
+  const color = value == null ? COLOR.unknown : value < 20 ? COLOR.low :
+    value < 50 ? COLOR.mid : accent;
   return { type: 'stack', direction: 'row', alignItems: 'center', gap: 4,
     children: [
-      nativeText(label, 11, '#465d78', 'semibold'),
+      nativeText(label, 11, COLOR.muted, 'semibold'),
       { type: 'spacer' },
-      nativeText(percentText(item.percent), 16, percentColor(item.percent, accent), 'bold')
+      nativeText(percentText(value), 16, color, 'bold')
     ] };
 }
 
-function nativeCard(title, data, accent) {
-  return { type: 'stack', direction: 'column', flex: 1, gap: 8, padding: [11, 10, 11, 10],
-    borderRadius: 8, borderWidth: 1, borderColor: '#ffffffcc',
-    backgroundGradient: { type: 'linear', colors: ['#ffffffd9', '#e6eff8c9', '#dce7f4db'],
-      startPoint: { x: 0, y: 0 }, endPoint: { x: 1, y: 1 } },
+function nativeCard(title, data, accent, small) {
+  return { type: 'stack', direction: 'column', flex: 1, gap: small ? 4 : 8,
+    padding: small ? [7, 9, 7, 9] : [11, 10, 11, 10],
+    borderRadius: 8, borderWidth: 1,
+    borderColor: adaptive('#ffffffdd', '#ffffff32'),
+    backgroundGradient: { type: 'linear', ...GRADIENT_POINTS,
+      colors: [adaptive('#ffffffed', '#293d58ee'),
+        adaptive('#e8f1fae3', '#202f47df'), adaptive('#dce7f4e8', '#18263de9')] },
     children: [
-      nativeText(title, 12, '#233952', 'bold'),
+      nativeText(title, 12, COLOR.body, 'bold'),
       nativeQuota('5h', data.h5, accent),
       nativeQuota('Weekly', data.weekly, accent)
     ] };
 }
 
 function nativeWidget(data, small, error) {
-  const children = [nativeText('ANTIGRAVITY', 12, '#344665', 'bold')];
+  const children = [nativeText('ANTIGRAVITY', 12, COLOR.title, 'bold')];
   if (error) {
-    children.push(nativeText(error[0], 15, '#a93450', 'bold'));
-    children.push(nativeText(error[1], 11, '#526681'));
+    children.push(nativeText(error[0], 15, COLOR.error, 'bold'));
+    children.push(nativeText(error[1], 11, COLOR.subtle));
   } else if (small) {
-    children.push(nativeCard('Claude / 3P', data.claude, '#b4593e'));
-    children.push(nativeCard('Gemini', data.gemini, '#3566cc'));
+    children.push(nativeCard('Claude / 3P', data.claude, COLOR.claude, true));
+    children.push(nativeCard('Gemini', data.gemini, COLOR.gemini, true));
   } else {
     children.push({ type: 'stack', direction: 'row', alignItems: 'start', gap: 8,
-      children: [nativeCard('Claude / 3P', data.claude, '#b4593e'),
-        nativeCard('Gemini', data.gemini, '#3566cc')] });
+      children: [nativeCard('Claude / 3P', data.claude, COLOR.claude, false),
+        nativeCard('Gemini', data.gemini, COLOR.gemini, false)] });
   }
   return { type: 'widget', refreshAfter: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-    padding: 12, gap: 9,
-    backgroundGradient: { type: 'linear', colors: ['#c9ddfa', '#edf2fb', '#dbd3f6'],
-      startPoint: { x: 0, y: 0 }, endPoint: { x: 1, y: 1 } }, children };
+    padding: small ? 10 : 12, gap: small ? 5 : 9,
+    backgroundGradient: { type: 'linear', ...GRADIENT_POINTS,
+      colors: [adaptive('#c9ddfa', '#111e32'), adaptive('#edf2fb', '#1c2d46'),
+        adaptive('#dbd3f6', '#2c2c4b')] }, children };
 }
 
 async function postJson(ctx, url, options) {
@@ -155,131 +168,4 @@ function formatResetTime(value) {
   return hours ? hours + 'h ' + (minutes % 60) + 'm' : minutes + 'm';
 }
 
-const FONT = '-apple-system, system-ui, sans-serif';
-function path(cx, x, y, w, h, r) {
-  cx.beginPath();
-  cx.moveTo(x + r, y);
-  cx.arcTo(x + w, y, x + w, y + h, r);
-  cx.arcTo(x + w, y + h, x, y + h, r);
-  cx.arcTo(x, y + h, x, y, r);
-  cx.arcTo(x, y, x + w, y, r);
-  cx.closePath();
-}
-function rect(cx, x, y, w, h, r, color) {
-  cx.fillStyle = color;
-  path(cx, x, y, w, h, r);
-  cx.fill();
-}
-function text(cx, value, x, y, size, color, weight = 500, align = 'left', maxWidth) {
-  cx.textAlign = align;
-  cx.textBaseline = 'alphabetic';
-  cx.font = weight + ' ' + size + 'px ' + FONT;
-  cx.fillStyle = color;
-  cx.fillText(String(value), x, y, maxWidth);
-}
-function glass(cx, x, y, w, h, r, tint) {
-  cx.save();
-  path(cx, x, y, w, h, r);
-  cx.clip();
-  const fill = cx.createLinearGradient(x, y, x + w, y + h);
-  fill.addColorStop(0, 'rgba(255,255,255,.75)');
-  fill.addColorStop(.48, 'rgba(244,249,255,.48)');
-  fill.addColorStop(1, 'rgba(219,231,250,.56)');
-  cx.fillStyle = fill;
-  cx.fillRect(x, y, w, h);
-  const glow = cx.createRadialGradient(x + w * .15, y - h * .2, 0, x + w * .15, y - h * .2, w);
-  glow.addColorStop(0, tint);
-  glow.addColorStop(1, 'rgba(255,255,255,0)');
-  cx.fillStyle = glow;
-  cx.fillRect(x, y, w, h);
-  const shine = cx.createLinearGradient(x, y, x, y + h * .6);
-  shine.addColorStop(0, 'rgba(255,255,255,.86)');
-  shine.addColorStop(1, 'rgba(255,255,255,0)');
-  cx.fillStyle = shine;
-  cx.fillRect(x, y, w, h * .6);
-  cx.restore();
-  cx.save();
-  path(cx, x + .5, y + .5, w - 1, h - 1, r);
-  cx.lineWidth = 1;
-  cx.strokeStyle = 'rgba(255,255,255,.92)';
-  cx.stroke();
-  cx.restore();
-}
-function percentColor(pct, accent) {
-  return pct == null ? '#8493a9' : pct < 20 ? '#d64c61' : pct < 50 ? '#ad7420' : accent;
-}
 function percentText(pct) { return pct == null ? '—' : pct + '%'; }
-function bar(cx, x, y, w, pct, color, h = 5) {
-  rect(cx, x, y, w, h, h / 2, 'rgba(100,127,166,.15)');
-  if (pct > 0) rect(cx, x, y, w * Math.min(100, pct) / 100, h, h / 2, color);
-}
-function quotaLine(cx, x, y, w, label, item, accent, compact) {
-  const color = percentColor(item.percent, accent);
-  text(cx, label, x, y, compact ? 10 : 11, '#405873', 600);
-  text(cx, percentText(item.percent), x + w, y, compact ? 12 : 14, color, 700, 'right');
-  bar(cx, x, y + (compact ? 7 : 10), w, item.percent, color, compact ? 4 : 5);
-  if (!compact) text(cx, 'Reset ' + item.resetText, x, y + 30, 10, '#536b88', 600, 'left', w);
-}
-function mediumCard(cx, x, y, w, data, title, accent, tint) {
-  glass(cx, x, y, w, 135, 20, tint);
-  rect(cx, x + 13, y + 15, 22, 22, 8, accent);
-  text(cx, title.slice(0, 1), x + 24, y + 31, 12, '#ffffff', 700, 'center');
-  text(cx, title, x + 42, y + 31, 12, '#223751', 700, 'left', w - 53);
-  quotaLine(cx, x + 14, y + 52, w - 28, '5h', data.h5, accent, false);
-  quotaLine(cx, x + 14, y + 94, w - 28, 'Weekly', data.weekly, accent, false);
-}
-function smallCard(cx, x, y, w, data, title, accent, tint) {
-  glass(cx, x, y, w, 58, 17, tint);
-  rect(cx, x + 10, y + 12, 5, 15, 3, accent);
-  text(cx, title, x + 21, y + 24, 11, '#253a54', 700, 'left', w - 65);
-  text(cx, percentText(data.h5.percent), x + w - 10, y + 24, 12,
-    percentColor(data.h5.percent, accent), 700, 'right');
-  bar(cx, x + 11, y + 32, w - 22, data.h5.percent, percentColor(data.h5.percent, accent), 4);
-  text(cx, 'Week ' + percentText(data.weekly.percent), x + 11, y + 49, 10, '#455c79', 600);
-  text(cx, data.h5.resetText, x + w - 10, y + 49, 10, '#526983', 600, 'right', w - 80);
-}
-function toDataUri(canvas) {
-  return canvas.convertToBlob({ type: 'image/png' }).then(async blob => {
-    const bytes = new Uint8Array(await blob.arrayBuffer());
-    let binary = '';
-    for (let i = 0; i < bytes.length; i += 0x8000) {
-      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-    }
-    return 'data:image/png;base64,' + btoa(binary);
-  });
-}
-async function renderWidget(data, small, error) {
-  const W = small ? 180 : 380, H = 180, dpr = 3;
-  const canvas = new OffscreenCanvas(W * dpr, H * dpr);
-  const cx = canvas.getContext('2d');
-  if (!cx) throw new Error('无法创建 Canvas');
-  cx.scale(dpr, dpr);
-  const bg = cx.createLinearGradient(0, 0, W, H);
-  bg.addColorStop(0, '#c9ddfa');
-  bg.addColorStop(.55, '#edf2fb');
-  bg.addColorStop(1, '#dbd3f6');
-  cx.fillStyle = bg;
-  cx.fillRect(0, 0, W, H);
-  // 暖冷色晕衬托半透明玻璃层；所有卡片裁切在自身圆角路径内。
-  const halo = cx.createRadialGradient(W * .78, 4, 2, W * .78, 4, W * .85);
-  halo.addColorStop(0, 'rgba(149,131,246,.42)');
-  halo.addColorStop(1, 'rgba(149,131,246,0)');
-  cx.fillStyle = halo;
-  cx.fillRect(0, 0, W, H);
-  text(cx, '✦  ANTIGRAVITY', small ? 15 : 19, 26, small ? 11 : 12, '#344665', 700);
-  if (!small) text(cx, new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
-    W - 20, 26, 10, '#647793', 600, 'right');
-  if (error) {
-    glass(cx, 15, 40, W - 30, 120, 21, 'rgba(253,180,186,.25)');
-    text(cx, error[0], W / 2, 91, small ? 13 : 17, '#a93450', 700, 'center', W - 48);
-    text(cx, error[1], W / 2, 116, small ? 9 : 11, '#526681', 500, 'center', W - 50);
-  } else if (small) {
-    smallCard(cx, 13, 38, W - 26, data.claude, 'Claude / 3P', '#cf7050', 'rgba(255,182,135,.32)');
-    smallCard(cx, 13, 105, W - 26, data.gemini, 'Gemini', '#4778dc', 'rgba(122,180,255,.30)');
-  } else {
-    const w = (W - 52) / 2;
-    mediumCard(cx, 19, 39, w, data.claude, 'Claude / 3P', '#cf7050', 'rgba(255,182,135,.32)');
-    mediumCard(cx, 33 + w, 39, w, data.gemini, 'Gemini', '#4778dc', 'rgba(122,180,255,.30)');
-  }
-  return toDataUri(canvas);
-}
