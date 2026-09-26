@@ -33,7 +33,8 @@ const COLOR = {
   low: adaptive('#d64c61', '#ff788e'),
   mid: adaptive('#ad7420', '#ffc577'),
   claude: adaptive('#b4593e', '#ffc19d'),
-  gemini: adaptive('#3566cc', '#92b9ff')
+  gemini: adaptive('#3566cc', '#92b9ff'),
+  track: adaptive('#8295ae4d', '#a3b8d247')
 };
 const GRADIENT_POINTS = {
   startPoint: { x: 0, y: 0 }, endPoint: { x: 1, y: 1 }
@@ -44,16 +45,25 @@ function nativeText(value, size, color, weight = 'medium') {
     textColor: color, maxLines: 1, minScale: 0.7 };
 }
 
-function nativeQuota(label, item, accent) {
+function nativeQuota(label, item, accent, small) {
   const value = item.percent;
   const color = value == null ? COLOR.unknown : value < 20 ? COLOR.low :
     value < 50 ? COLOR.mid : accent;
-  return { type: 'stack', direction: 'row', alignItems: 'center', gap: 4,
-    children: [
-      nativeText(label, 11, COLOR.muted, 'semibold'),
-      { type: 'spacer' },
-      nativeText(percentText(value), 16, color, 'bold')
-    ] };
+  const percent = value == null ? 0 : Math.max(0, Math.min(100, value));
+  const trackWidth = small ? 100 : 116;
+  const track = { type: 'stack', direction: 'row', width: trackWidth, height: 6,
+    borderRadius: 3, backgroundColor: COLOR.track,
+    children: percent ? [{ type: 'stack', width: trackWidth * percent / 100,
+      height: 6, borderRadius: 3, backgroundColor: color, children: [] }] : [] };
+  return { type: 'stack', direction: 'column', gap: 4, children: [
+    { type: 'stack', direction: 'row', alignItems: 'center', gap: 4,
+      children: [
+        nativeText(label, 11, COLOR.muted, 'semibold'),
+        { type: 'spacer' },
+        nativeText(percentText(value), 16, color, 'bold')
+      ] },
+    track
+  ] };
 }
 
 function nativeCard(title, data, accent, small) {
@@ -66,8 +76,8 @@ function nativeCard(title, data, accent, small) {
         adaptive('#e8f1fae3', '#202f47df'), adaptive('#dce7f4e8', '#18263de9')] },
     children: [
       nativeText(title, 12, COLOR.body, 'bold'),
-      nativeQuota('5h', data.h5, accent),
-      nativeQuota('Weekly', data.weekly, accent)
+      nativeQuota('5h', data.h5, accent, small),
+      nativeQuota('Weekly', data.weekly, accent, small)
     ] };
 }
 
