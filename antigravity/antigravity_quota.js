@@ -28,17 +28,54 @@ export default async function (ctx) {
       children: []
     };
   } catch (e) {
-    // Canvas 不可用时仍给出可读的原生 DSL 提示，不让小组件空白。
-    return {
-      type: 'widget', backgroundColor: { light: '#e9eff9', dark: '#172336' },
-      padding: 18, children: [
-        { type: 'text', text: error ? error[0] : 'Antigravity 配额',
-          font: { size: 16, weight: 'bold' }, color: '#385477' },
-        { type: 'text', text: error ? error[1] : '当前设备不支持 Canvas 绘制',
-          font: { size: 12 }, color: '#607899' }
-      ]
-    };
+    // Some Egern widget runtimes have no OffscreenCanvas; keep the quota visible.
+    return nativeWidget(data, small, error);
   }
+}
+
+function nativeText(value, size, color, weight = 'medium') {
+  return { type: 'text', text: String(value), font: { size, weight },
+    textColor: color, maxLines: 1, minScale: 0.7 };
+}
+
+function nativeQuota(label, item, accent) {
+  return { type: 'stack', direction: 'row', alignItems: 'center', gap: 4,
+    children: [
+      nativeText(label, 11, '#465d78', 'semibold'),
+      { type: 'spacer' },
+      nativeText(percentText(item.percent), 16, percentColor(item.percent, accent), 'bold')
+    ] };
+}
+
+function nativeCard(title, data, accent) {
+  return { type: 'stack', direction: 'column', flex: 1, gap: 8, padding: [11, 10, 11, 10],
+    borderRadius: 8, borderWidth: 1, borderColor: '#ffffffcc',
+    backgroundGradient: { type: 'linear', colors: ['#ffffffd9', '#e6eff8c9', '#dce7f4db'],
+      startPoint: { x: 0, y: 0 }, endPoint: { x: 1, y: 1 } },
+    children: [
+      nativeText(title, 12, '#233952', 'bold'),
+      nativeQuota('5h', data.h5, accent),
+      nativeQuota('Weekly', data.weekly, accent)
+    ] };
+}
+
+function nativeWidget(data, small, error) {
+  const children = [nativeText('ANTIGRAVITY', 12, '#344665', 'bold')];
+  if (error) {
+    children.push(nativeText(error[0], 15, '#a93450', 'bold'));
+    children.push(nativeText(error[1], 11, '#526681'));
+  } else if (small) {
+    children.push(nativeCard('Claude / 3P', data.claude, '#b4593e'));
+    children.push(nativeCard('Gemini', data.gemini, '#3566cc'));
+  } else {
+    children.push({ type: 'stack', direction: 'row', alignItems: 'start', gap: 8,
+      children: [nativeCard('Claude / 3P', data.claude, '#b4593e'),
+        nativeCard('Gemini', data.gemini, '#3566cc')] });
+  }
+  return { type: 'widget', refreshAfter: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+    padding: 12, gap: 9,
+    backgroundGradient: { type: 'linear', colors: ['#c9ddfa', '#edf2fb', '#dbd3f6'],
+      startPoint: { x: 0, y: 0 }, endPoint: { x: 1, y: 1 } }, children };
 }
 
 async function postJson(ctx, url, options) {

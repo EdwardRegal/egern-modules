@@ -6,7 +6,7 @@ icon: https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/antigravi
 scriptings:
   - generic:
       name: "antigravity_quota_widget"
-      script_url: https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/antigravity/antigravity_quota.js
+      script_url: https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/antigravity/antigravity_quota.js?v=20260927-2
       timeout: 30
 
 widgets:
