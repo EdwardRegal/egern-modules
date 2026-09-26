@@ -159,14 +159,16 @@ async function fetchQuotaSummary(ctx, token) {
 
 function parseQuotas(data) {
   const result = { claude: emptyGroup(), gemini: emptyGroup() };
-  for (const group of (Array.isArray(data.groups) ? data.groups : [])) {
+  const groups = Array.isArray(data && data.groups) ? data.groups : [];
+  for (const group of groups) {
     const name = String(group.displayName || group.name || '').toLowerCase();
-    const key = /claude|3p|gpt/.test(name) ? 'claude' : /gemini/.test(name) ? 'gemini' : null;
+    const key = (/claude|3p|gpt/.test(name)) ? 'claude' :
+      (/gemini|google/.test(name)) ? 'gemini' : null;
     if (!key || !Array.isArray(group.buckets)) continue;
     for (const bucket of group.buckets) {
-      const window = String(bucket.window || bucket.name || '').toLowerCase();
-      const kind = /week|7.day|10080/.test(window) ? 'weekly' :
-        /5\s*[-_ ]?h|5.hour|300/.test(window) ? 'h5' : null;
+      const windowStr = String(bucket.window || bucket.name || bucket.bucketId || '').toLowerCase();
+      const kind = (/week|7.day|10080/.test(windowStr)) ? 'weekly' :
+        (/5\s*[-_ ]?h|5.hour|300/.test(windowStr)) ? 'h5' : null;
       if (!kind) continue;
       const fraction = Number(bucket.remainingFraction);
       if (bucket.remainingFraction == null || !Number.isFinite(fraction)) continue;
@@ -191,8 +193,10 @@ function formatResetTime(value) {
   if (!value) return '—';
   const ms = new Date(value).getTime();
   if (!Number.isFinite(ms)) return '—';
-  const minutes = Math.max(0, Math.ceil((ms - Date.now()) / 60000));
-  if (!minutes) return 'soon';
+  const diff = ms - Date.now();
+  if (diff <= 0) return '0m';
+  const minutes = Math.max(0, Math.ceil(diff / 60000));
+  if (!minutes) return '0m';
   const days = Math.floor(minutes / 1440);
   if (days) return days + 'd ' + Math.floor((minutes % 1440) / 60) + 'h';
   const hours = Math.floor(minutes / 60);
