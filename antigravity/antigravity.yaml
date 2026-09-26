@@ -1,20 +1,23 @@
-name: "Antigravity 额度组件"
-description: "监控 Antigravity (Google AI Pro) 账号的 Claude 与 Gemini 5小时额度与周额度。"
+name: "Antigravity 额度小组件"
+description: "iOS 原生桌面小组件：监控 Antigravity (Google AI Pro) 账号的 Claude 与 Gemini 5小时额度与周额度。"
 author: "EdwardRegal"
 icon: https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/antigravity/antigravity.png
 
 scriptings:
-  # 1. 桌面组件/应用面板 (Panel)：点击即时刷新展示
-  - panel:
-      name: "Antigravity 配额"
-      title: "Antigravity Quota"
-      content: "点击刷新配额数据"
+  # 1. 通用脚本（Generic）：生成原生 iOS 小组件 DSL
+  - generic:
+      name: "antigravity_quota_widget"
       script_url: https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/antigravity/antigravity_quota.js
-      update_interval: 1800
+      timeout: 30
 
-  # 2. 定时通知任务 (Schedule)：每 2 小时推送一次
+  # 2. 定时通知任务（Schedule）：每 2 小时后台巡检
   - schedule:
-      name: "Antigravity 额度检查"
+      name: "antigravity_quota_schedule"
       cron: 0 0 */2 * * *
       script_url: https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/antigravity/antigravity_quota.js
-      timeout: 60
+      timeout: 30
+
+widgets:
+  # 注册到 Egern 小组件画廊并可在 iOS 桌面添加
+  - name: "Antigravity 额度"
+    script_name: "antigravity_quota_widget"
