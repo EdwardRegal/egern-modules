@@ -42,26 +42,26 @@ for (const family of ['systemSmall', 'systemMedium']) {
   checkColors(widget);
   const cards = family === 'systemSmall' ? widget.children.slice(1) : widget.children[1].children;
   assert.equal(cards.length, 2);
-  assert.deepEqual(cards.map(card => card.children.slice(1).map(row => row.children[0].children[2].text)),
+  assert.deepEqual(cards.map(card => card.children.slice(1).map(row => row.children[1].text)),
     [['0%', '42%'], ['100%', '19%']]);
-  for (const card of cards) for (const row of card.children.slice(1)) {
-    assert.equal(row.children[0].children[2].maxLines, 1);
-    const track = row.children[1];
-    assert.equal(track.height, family === 'systemSmall' ? 4 : 6);
-    assert.equal(track.width, family === 'systemSmall' ? 100 : 116);
-    assert.deepEqual(Object.keys(track.backgroundColor).sort(), ['dark', 'light']);
-    const value = Number.parseInt(row.children[0].children[2].text, 10);
-    assert.equal(track.children.length, value === 0 ? 0 : 1);
-    if (value > 0) {
-      assert.equal(track.children[0].width, track.width * value / 100);
-      assert.equal(track.children[0].height, track.height);
+  for (const card of cards) {
+    assert.equal(card.alignItems, 'start');
+    for (const row of card.children.slice(1)) {
+      assert.equal(row.type, 'stack');
+      assert.equal(row.direction, 'row');
+      assert.equal(row.children.length, 2);
+      assert.equal(row.children[0].type, 'text');
+      assert.equal(row.children[1].type, 'text');
+      assert.equal(row.children[1].maxLines, 1);
+      assert.equal(row.width, undefined);
+      assert.equal(row.backgroundColor, undefined);
     }
   }
 }
 assert.equal(requests.length, 4);
 assert.match(requests[0].options.body, /refresh_token=stub-refresh-token/);
 assert.equal(requests[1].options.headers.Authorization, 'Bearer stub-access-token');
-assert.deepEqual([...palettes].sort(), ['backgroundColor', 'borderColor', 'gradient', 'textColor']);
+assert.deepEqual([...palettes].sort(), ['borderColor', 'gradient', 'textColor']);
 const missing = await quotaWidget({ env: {}, widgetFamily: 'systemSmall' });
 assert.equal(missing.children.length, 3);
 assert.match(missing.children[1].text, /REFRESH_TOKEN/);
@@ -73,9 +73,6 @@ assert.equal(fail.children.length, 3);
 checkColors(fail);
 const empty = await quotaWidget({ env: { REFRESH_TOKEN: 'stub-refresh-token' }, widgetFamily: 'systemMedium',
   http: { post: async url => ({ json: async () => url.includes('oauth2') ? { access_token: 'stub' } : { groups: [] } }) } });
-assert.deepEqual(empty.children[1].children.map(card => card.children.slice(1).map(row => row.children[0].children[2].text)),
+assert.deepEqual(empty.children[1].children.map(card => card.children.slice(1).map(row => row.children[1].text)),
   [['—', '—'], ['—', '—']]);
-for (const card of empty.children[1].children) for (const row of card.children.slice(1)) {
-  assert.equal(row.children[1].children.length, 0);
-}
-console.log('PASS: adaptive light/dark progress bars, small/medium quotas, errors, missing-data placeholders');
+console.log('PASS: left-aligned text-only small/medium quotas, adaptive colors, errors, missing-data placeholders');
