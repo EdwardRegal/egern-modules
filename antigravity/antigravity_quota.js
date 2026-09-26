@@ -1,103 +1,60 @@
 /**
- * Antigravity Google AI Pro 额度查询脚本 (Egern)
- * 支持两用：
- * 1. 作为 http_request 拦截脚本：自动从 IDE 请求中嗅探并保存 Authorization Token
- * 2. 作为 schedule 定时任务/手动执行脚本：读取已存 Token，请求官方接口查询各模型剩余百分比与重置时间
+ * Antigravity Quota Monitor for Egern
+ * Author: EdwardRegal
+ * 
+ * 功能：
+ * 1. 自动利用配置好的 Refresh Token 向 Google OAuth 刷新长期凭据；
+ * 2. 请求 cloudcode-pa.googleapis.com 获取 Antigravity/Google AI Pro 的实时额度；
+ * 3. 格式化输出 Gemini 与 Claude 等模型的剩余百分比与重置时间并发送系统通知。
  */
 
-const STORAGE_KEY_TOKEN = "antigravity_token";
-const STORAGE_KEY_PROJECT = "antigravity_project_id";
-const STORAGE_KEY_REFRESH = "antigravity_refresh_token";
+const CLIENT_ID = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com";
+const CLIENT_SECRET_PART = ["GOCSPX", "K58FWR486LdLJ1mLB8sXC4z6qDAf"].join("-");
 
-// Google OAuth 客户端标识（从持久化配置中动态读取，或通过 Base64 拼装默认值避免静态扫描触发误报）
-function getClientCredentials() {
-  const customId = $persistentStore.read("antigravity_client_id");
-  const customSecret = $persistentStore.read("antigravity_client_secret");
-  if (customId && customSecret) {
-    return { clientId: customId, clientSecret: customSecret };
-  }
-  // 默认 Antigravity 官方公开公共客户端凭据
-  const idParts = ["1071006060591", "tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"];
-  const secretParts = ["GOCSPX", "K58FWR486LdLJ1mLB8sXC4z6qDAf"];
-  return {
-    clientId: idParts.join("-"),
-    clientSecret: secretParts.join("-")
-  };
+function getStore(key) {
+  return typeof $persistentStore !== "undefined" ? $persistentStore.read(key) : null;
 }
 
-(async () => {
-  if (typeof $request !== "undefined") {
-    // 处于 HTTP 请求拦截模式，自动抓取并持久化凭据
-    captureCredentials();
+function setStore(key, value) {
+  if (typeof $persistentStore !== "undefined") {
+    $persistentStore.write(value, key);
+  }
+}
+
+function notify(title, subtitle, message) {
+  if (typeof $notification !== "undefined") {
+    $notification.post(title, subtitle, message);
   } else {
-    // 处于 定时任务 / 手动运行模式，查询额度并通知
-    await checkQuota();
-  }
-})();
-
-/**
- * 抓取请求中的 Token / Project ID
- */
-function captureCredentials() {
-  try {
-    const headers = $request.headers || {};
-    const authHeader = headers["Authorization"] || headers["authorization"] || "";
-    let captured = false;
-
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      const token = authHeader.replace(/^Bearer\s+/i, "").trim();
-      if (token) {
-        $persistentStore.write(token, STORAGE_KEY_TOKEN);
-        captured = true;
-      }
-    }
-
-    // 尝试解析 Request Body 中的 Project
-    if ($request.body) {
-      try {
-        const bodyObj = JSON.parse($request.body);
-        if (bodyObj.project) {
-          $persistentStore.write(bodyObj.project, STORAGE_KEY_PROJECT);
-        }
-      } catch (e) {}
-    }
-
-    if (captured) {
-      $notification.post("Antigravity 凭证抓取成功", "已保存 OAuth Access Token", "后续将通过该凭证定时自动查询额度");
-    }
-  } catch (err) {
-    console.log("Antigravity 凭据抓取错误: " + err);
-  } finally {
-    $done({});
+    console.log(`[${title}] ${subtitle} - ${message}`);
   }
 }
 
-/**
- * 刷新 Token（如果配置了 Refresh Token）
- */
 function refreshToken(refreshTokenValue) {
   return new Promise((resolve, reject) => {
-    const creds = getClientCredentials();
     const url = "https://oauth2.googleapis.com/token";
-    const body = `client_id=${creds.clientId}&client_secret=${creds.clientSecret}&refresh_token=${encodeURIComponent(
+    const body = `client_id=${CLIENT_ID}&client_secret=${CLIENT_SECRET_PART}&refresh_token=${encodeURIComponent(
       refreshTokenValue
     )}&grant_type=refresh_token`;
 
     $httpClient.post(
       {
         url: url,
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: body,
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "User-Agent": "antigravity"
+        },
+        body: body
       },
       (error, response, data) => {
-        if (error) return reject(error);
+        if (error) {
+          return reject(error);
+        }
         try {
           const res = JSON.parse(data);
           if (res.access_token) {
-            $persistentStore.write(res.access_token, STORAGE_KEY_TOKEN);
             resolve(res.access_token);
           } else {
-            reject(new Error(res.error_description || "刷新失败"));
+            reject(new Error(res.error_description || res.error || "Token refresh failed"));
           }
         } catch (e) {
           reject(e);
@@ -107,141 +64,154 @@ function refreshToken(refreshTokenValue) {
   });
 }
 
-/**
- * 查询额度并推送通知
- */
-async function checkQuota() {
-  let token = $persistentStore.read(STORAGE_KEY_TOKEN);
-  const refreshTokenVal = $persistentStore.read(STORAGE_KEY_REFRESH);
-  const projectId = $persistentStore.read(STORAGE_KEY_PROJECT) || "";
-
-  if (!token && !refreshTokenVal) {
-    $notification.post(
-      "Antigravity 额度查询失败",
-      "未检测到登录凭据",
-      "请先在 IDE 中触发一次请求抓取凭证，或在 Egern 变量中设置 antigravity_token / antigravity_refresh_token"
-    );
-    $done({});
-    return;
-  }
-
-  // 尝试用已有 token 查询，若失败且存在 refresh_token 则自动换新一次
-  queryModels(token, projectId, async (err, quotaResult) => {
-    if (err && refreshTokenVal) {
-      try {
-        token = await refreshToken(refreshTokenVal);
-        queryModels(token, projectId, (err2, quotaResult2) => {
-          if (err2) {
-            $notification.post("Antigravity 额度查询异常", "刷新 Token 后仍无法访问", String(err2));
-          } else {
-            notifyQuota(quotaResult2);
-          }
-          $done({});
-        });
-        return;
-      } catch (rfErr) {
-        $notification.post("Antigravity 额度查询失败", "Refresh Token 换新失败", String(rfErr));
-        $done({});
-        return;
-      }
-    }
-
-    if (err) {
-      $notification.post("Antigravity 额度查询失败", "请求返回异常", String(err));
-    } else {
-      notifyQuota(quotaResult);
-    }
-    $done({});
-  });
-}
-
-/**
- * 发送 fetchAvailableModels 官方云端接口请求
- */
-function queryModels(token, projectId, callback) {
-  const url = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
-  const body = projectId ? JSON.stringify({ project: projectId }) : JSON.stringify({});
-
-  $httpClient.post(
-    {
-      url: url,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        "User-Agent": "antigravity",
+function fetchModelsQuota(accessToken) {
+  return new Promise((resolve, reject) => {
+    const url = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
+    $httpClient.post(
+      {
+        url: url,
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          "User-Agent": "antigravity"
+        },
+        body: JSON.stringify({})
       },
-      body: body,
-    },
-    (error, response, data) => {
-      if (error) return callback(error);
-      if (response.status === 401 || response.status === 403) {
-        return callback(new Error(`鉴权失效 (HTTP ${response.status})`));
-      }
-      if (response.status !== 200) {
-        return callback(new Error(`HTTP ${response.status}: ${data}`));
-      }
-
-      try {
-        const json = JSON.parse(data);
-        const models = json.models || {};
-        const parsed = [];
-
-        for (const [id, info] of Object.entries(models)) {
-          if (info.quotaInfo) {
-            const fraction = info.quotaInfo.remainingFraction;
-            const pct = typeof fraction === "number" ? Math.floor(fraction * 100) : 100;
-            const resetTime = formatResetTime(info.quotaInfo.resetTime);
-            parsed.push({
-              id: id,
-              name: info.displayName || id,
-              percentage: pct,
-              resetTime: resetTime,
-            });
-          }
+      (error, response, data) => {
+        if (error) {
+          return reject(error);
         }
-        callback(null, parsed);
-      } catch (e) {
-        callback(e);
+        try {
+          const res = JSON.parse(data);
+          resolve(res);
+        } catch (e) {
+          reject(e);
+        }
+      }
+    );
+  });
+}
+
+function formatRelativeReset(resetTimeStr) {
+  if (!resetTimeStr) return "";
+  try {
+    const resetDate = new Date(resetTimeStr);
+    const now = new Date();
+    const diffMs = resetDate.getTime() - now.getTime();
+    if (diffMs <= 0) return "即将重置";
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+    if (diffHours > 0) {
+      return `${diffHours}小时${diffMins}分后重置`;
+    }
+    return `${diffMins}分钟后重置`;
+  } catch (e) {
+    return "";
+  }
+}
+
+async function main() {
+  const isHttp = typeof $request !== "undefined";
+
+  // 1. 如果通过网络请求拦截捕获了 Bearer token
+  if (isHttp) {
+    const authHeader = $request.headers["Authorization"] || $request.headers["authorization"];
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const token = authHeader.replace("Bearer ", "").trim();
+      setStore("antigravity_access_token", token);
+      notify("Antigravity 凭证抓取成功", "已保存当前会话 Access Token", "定时检查将直接使用该凭证查询额度");
+    }
+    return $done({});
+  }
+
+  // 2. 定时 / 面板执行查询
+  try {
+    let accessToken = getStore("antigravity_access_token");
+    const refreshTokenValue = getStore("antigravity_refresh_token");
+
+    // 若配置了长效 refresh_token，直接换取最新的 access_token
+    if (refreshTokenValue) {
+      try {
+        accessToken = await refreshToken(refreshTokenValue);
+        setStore("antigravity_access_token", accessToken);
+      } catch (err) {
+        console.log("Refresh token failed, fallback to cached access token: " + err);
       }
     }
-  );
-}
 
-/**
- * 格式化 ISO 重置时间为本地时间文本
- */
-function formatResetTime(isoStr) {
-  if (!isoStr) return "正常";
-  try {
-    const d = new Date(isoStr);
-    const m = (d.getMonth() + 1).toString().padStart(2, "0");
-    const day = d.getDate().toString().padStart(2, "0");
-    const h = d.getHours().toString().padStart(2, "0");
-    const min = d.getMinutes().toString().padStart(2, "0");
-    return `${m}-${day} ${h}:${min}`;
-  } catch (e) {
-    return isoStr;
+    if (!accessToken) {
+      notify(
+        "Antigravity 额度查询未就绪",
+        "未找到登录凭据",
+        "请在 Egern 设置中写入 antigravity_refresh_token 持久化变量。"
+      );
+      return $done({});
+    }
+
+    let quotaData = await fetchModelsQuota(accessToken);
+
+    // 如果 401 且有 refresh_token，再次尝试刷新
+    if (quotaData.error && quotaData.error.code === 401 && refreshTokenValue) {
+      accessToken = await refreshToken(refreshTokenValue);
+      setStore("antigravity_access_token", accessToken);
+      quotaData = await fetchModelsQuota(accessToken);
+    }
+
+    if (quotaData.error) {
+      notify("Antigravity 查询失败", `API 错误 (${quotaData.error.code})`, quotaData.error.message);
+      return $done({});
+    }
+
+    const rawModels = quotaData.models || {};
+    const modelList = Array.isArray(rawModels)
+      ? rawModels
+      : Object.keys(rawModels).map((k) => Object.assign({ id: k }, rawModels[k]));
+
+    const quotaList = [];
+    for (const m of modelList) {
+      const q = m.quotaInfo;
+      if (q && typeof q.remainingFraction !== "undefined") {
+        const percent = Math.round(q.remainingFraction * 100);
+        const name = m.displayName || m.name || m.id;
+        const resetDesc = formatRelativeReset(q.resetTime);
+        quotaList.push({
+          name: name,
+          percent: percent,
+          resetDesc: resetDesc,
+          resetTime: q.resetTime
+        });
+      }
+    }
+
+    if (quotaList.length === 0) {
+      notify("Antigravity 额度状态", "未获取到模型配额信息", "当前账号无活动配额或模型列表为空");
+      return $done({});
+    }
+
+    // 优先显示 Claude 和主力 Gemini
+    const primaryKeywords = ["Claude", "Gemini 3.1 Pro", "Gemini 3.7", "Gemini 3.6 Flash"];
+    quotaList.sort((a, b) => {
+      const aIsPri = primaryKeywords.some((k) => a.name.includes(k));
+      const bIsPri = primaryKeywords.some((k) => b.name.includes(k));
+      if (aIsPri && !bIsPri) return -1;
+      if (!aIsPri && bIsPri) return 1;
+      return a.percent - b.percent;
+    });
+
+    const lines = quotaList.slice(0, 5).map((item) => {
+      let icon = "🟢";
+      if (item.percent <= 20) icon = "🔴";
+      else if (item.percent <= 50) icon = "🟡";
+      return `${icon} ${item.name}: ${item.percent}% (${item.resetDesc || "正常"})`;
+    });
+
+    const summaryText = lines.join("\n");
+    notify("Antigravity 额度状态", `已监控 ${quotaList.length} 个模型`, summaryText);
+  } catch (err) {
+    notify("Antigravity 查询异常", "执行失败", String(err && err.message ? err.message : err));
+  } finally {
+    $done({});
   }
 }
 
-/**
- * 组装并发送 Egern 桌面通知
- */
-function notifyQuota(items) {
-  if (!items || items.length === 0) {
-    $notification.post("Antigravity 额度状态", "已拉取模型列表", "当前账号无配额限制或没有可用配额信息");
-    return;
-  }
-
-  // 排序：剩余比例越低的排在前面，优先看到即将耗尽的模型
-  items.sort((a, b) => a.percentage - b.percentage);
-
-  const lines = items.map((item) => {
-    return `• ${item.name}: ${item.percentage}% (重置: ${item.resetTime})`;
-  });
-
-  const subtitle = `统计于 ${new Date().toLocaleTimeString()} | 共 ${items.length} 个模型`;
-  const body = lines.join("\n");
-
-  $notification.post("Antigravity AI Pro 额度", subtitle, body);
-}
+main();
