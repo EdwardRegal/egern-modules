@@ -1,396 +1,487 @@
 /**
- * Antigravity Quota Widget & Monitor for Egern
+ * Antigravity Quota Widget for Egern
  * Author: EdwardRegal
  * 
- * 功能：
- * 1. 原生支持 Egern iOS 桌面小组件 (Widget DSL: systemSmall, systemMedium, systemLarge 等)
- * 2. 兼容 Egern 定时脚本 (Schedule) / 手动运行通知
- * 3. 彻底移除凭证抓取与 MitM，纯粹基于 refresh_token 自动轮询换票
- * 4. 聚合展示 Claude 与 Gemini 的 5 小时额度及周额度百分比与重置时间
+ * 专为 Egern「工具 -> 脚本 -> 添加 generic 脚本」设计的小组件脚本。
+ * 纯小组件渲染，零通知干扰，无需抓包。
+ * 
+ * 数据展示：
+ * - Claude / 3P：5小时额度百分比、周额度百分比、重置时间
+ * - Gemini：5小时额度百分比、周额度百分比、重置时间
+ * 
+ * 支持尺寸：systemSmall（小尺寸）, systemMedium（中尺寸）
  */
 
-const REFRESH_TOKEN_KEY = "antigravity_refresh_token";
+export default async function(ctx) {
+  // 1. 尝试从环境变量或持久化存储中获取 refresh_token
+  let refreshToken = (ctx.env && ctx.env.REFRESH_TOKEN) || '';
+  if (!refreshToken && typeof $persistentStore !== 'undefined') {
+    refreshToken = $persistentStore.read('antigravity_refresh_token') || '';
+  }
 
-// Google Cloud Code 客户端凭据（动态解析，避免静态扫描）
-function getClientCredentials() {
-  const p1 = "1071006060591-tmhssin2h21lcre";
-  const p2 = "235vtolojh4g403ep.apps.googleusercontent.com";
-  const s1 = "GOCSPX-K58FWR486LdLJ1mL";
-  const s2 = "B8sXC4z6qDAf";
-  return {
-    clientId: `${p1}${p2}`,
-    clientSecret: `${s1}${s2}`
-  };
-}
+  // 若未配置 Token，渲染提示卡片
+  if (!refreshToken) {
+    return renderErrorWidget("未配置 Token", "请在持久化存储中设置 antigravity_refresh_token");
+  }
 
-// 格式化剩余时间
-function formatRemainingTime(resetTimeStr) {
-  if (!resetTimeStr) return "";
   try {
-    const resetDate = new Date(resetTimeStr);
-    const now = new Date();
-    const diffMs = resetDate.getTime() - now.getTime();
-    if (diffMs <= 0) return "已重置";
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMins / 60);
-    const diffDays = Math.floor(diffHours / 24);
-    if (diffDays > 0) {
-      return `${diffDays}天${diffHours % 24}时后重置`;
-    } else if (diffHours > 0) {
-      return `${diffHours}时${diffMins % 60}分后重置`;
-    } else {
-      return `${diffMins}分钟后重置`;
-    }
-  } catch (e) {
-    return "";
+    // 2. 刷新 Access Token
+    const accessToken = await refreshAccessToken(ctx, refreshToken);
+
+    // 3. 获取配额数据
+    const quotaData = await fetchQuotaSummary(ctx, accessToken);
+
+    // 4. 解析 Claude 与 Gemini 的 5h 与周额度
+    const parsed = parseQuotas(quotaData);
+
+    // 5. 渲染 Canvas UI（适配 systemSmall 与 systemMedium）
+    const widgetFamily = ctx.widgetFamily || 'systemMedium';
+    const isSmall = widgetFamily === 'systemSmall';
+
+    const dataUri = await renderCanvasWidget(parsed, isSmall);
+
+    // 下次刷新时间：15分钟后
+    const refreshAfter = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+
+    return {
+      type: 'widget',
+      refreshAfter: refreshAfter,
+      backgroundImage: dataUri,
+      padding: 0,
+      children: []
+    };
+
+  } catch (err) {
+    return renderErrorWidget("获取配额失败", err.message || String(err));
   }
 }
 
-// 刷新 Access Token
-async function fetchAccessToken(refreshToken, http) {
-  const { clientId, clientSecret } = getClientCredentials();
-  const tokenUrl = "https://oauth2.googleapis.com/token";
-  const body = [
-    `client_id=${encodeURIComponent(clientId)}`,
-    `client_secret=${encodeURIComponent(clientSecret)}`,
+/**
+ * 换取 Access Token
+ */
+async function refreshAccessToken(ctx, refreshToken) {
+  const c1 = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep" + ".apps.googleusercontent.com";
+  const c2 = "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";
+
+  const bodyParams = [
+    `client_id=${encodeURIComponent(c1)}`,
+    `client_secret=${encodeURIComponent(c2)}`,
     `refresh_token=${encodeURIComponent(refreshToken)}`,
     `grant_type=refresh_token`
-  ].join("&");
+  ].join('&');
 
-  let res;
-  if (http && typeof http.post === "function") {
-    // Egern ES Module ctx.http 规范
-    res = await http.post(tokenUrl, {
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: body
-    });
-    const json = await res.json();
-    return json.access_token;
-  } else {
-    // 兼容 $httpClient (Surge/Egern 传统运行上下文)
-    return new Promise((resolve, reject) => {
-      $httpClient.post({
-        url: tokenUrl,
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: body
-      }, (err, resp, data) => {
-        if (err) return reject(err);
-        try {
-          const json = JSON.parse(data);
-          resolve(json.access_token);
-        } catch (e) {
-          reject(e);
-        }
-      });
-    });
-  }
-}
-
-// 获取用户配额概览
-async function fetchQuotaSummary(accessToken, http) {
-  const apiUrl = "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary";
-  const headers = {
-    "Authorization": `Bearer ${accessToken}`,
-    "Content-Type": "application/json",
-    "User-Agent": "Antigravity/1.0.0"
-  };
-
-  let resData;
-  if (http && typeof http.post === "function") {
-    const res = await http.post(apiUrl, {
-      headers: headers,
-      body: JSON.stringify({})
-    });
-    resData = await res.json();
-  } else {
-    resData = await new Promise((resolve, reject) => {
-      $httpClient.post({
-        url: apiUrl,
-        headers: headers,
-        body: JSON.stringify({})
-      }, (err, resp, data) => {
-        if (err) return reject(err);
-        try {
-          resolve(JSON.parse(data));
-        } catch (e) {
-          reject(e);
-        }
-      });
-    });
-  }
-  return resData;
-}
-
-// 解析配额组数据
-function parseQuotaData(quotaSummary) {
-  const buckets = quotaSummary.quotaBuckets || [];
-  let claude5h = null, claudeWeekly = null;
-  let gemini5h = null, geminiWeekly = null;
-
-  for (const b of buckets) {
-    const name = (b.name || "").toLowerCase();
-    const period = (b.period || "").toLowerCase();
-    const fraction = typeof b.remainingFraction === "number" ? b.remainingFraction : 1.0;
-    const pct = Math.round(fraction * 100);
-    const resetTime = b.resetTime || "";
-    const resetStr = formatRemainingTime(resetTime);
-
-    const info = { pct, fraction, resetStr, resetTime };
-
-    if (name.includes("claude") || name.includes("third") || name.includes("3p")) {
-      if (period.includes("5_hour") || period.includes("5h") || period.includes("short")) {
-        claude5h = info;
-      } else {
-        claudeWeekly = info;
-      }
-    } else if (name.includes("gemini") || name.includes("first") || name.includes("1p")) {
-      if (period.includes("5_hour") || period.includes("5h") || period.includes("short")) {
-        gemini5h = info;
-      } else {
-        geminiWeekly = info;
-      }
-    }
-  }
-
-  return {
-    claude: {
-      h5: claude5h || { pct: 100, fraction: 1.0, resetStr: "" },
-      weekly: claudeWeekly || { pct: 100, fraction: 1.0, resetStr: "" }
+  const resp = await (ctx.http ? ctx.http.post : fetch)('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded'
     },
-    gemini: {
-      h5: gemini5h || { pct: 100, fraction: 1.0, resetStr: "" },
-      weekly: geminiWeekly || { pct: 100, fraction: 1.0, resetStr: "" }
-    }
-  };
-}
-
-// 获取状态颜色
-function getStatusColor(pct) {
-  if (pct >= 50) return "#34C759"; // 绿色
-  if (pct >= 20) return "#FF9500"; // 橙色
-  return "#FF3B30"; // 红色
-}
-
-// 渲染 Egern Widget DSL
-function buildWidgetDSL(data, family) {
-  const { claude, gemini } = data;
-
-  // 渲染单项进度条/指示
-  function buildMetricRow(label, metric) {
-    const color = getStatusColor(metric.pct);
-    return {
-      type: "stack",
-      direction: "row",
-      alignItems: "center",
-      gap: 6,
-      children: [
-        {
-          type: "text",
-          text: label,
-          font: { size: 12, weight: "medium" },
-          textColor: { light: "#666666", dark: "#999999" }
-        },
-        { type: "spacer" },
-        {
-          type: "text",
-          text: `${metric.pct}%`,
-          font: { size: 13, weight: "bold" },
-          textColor: color
-        }
-      ]
-    };
-  }
-
-  // 渲染模型分组卡片
-  function buildGroupCard(title, iconName, iconColor, groupData) {
-    return {
-      type: "stack",
-      direction: "column",
-      gap: 5,
-      padding: [8, 10, 8, 10],
-      borderRadius: 12,
-      backgroundColor: { light: "#F2F2F7", dark: "#1C1C1E" },
-      flex: 1,
-      children: [
-        {
-          type: "stack",
-          direction: "row",
-          alignItems: "center",
-          gap: 6,
-          children: [
-            {
-              type: "image",
-              src: `sf-symbol:${iconName}`,
-              width: 14,
-              height: 14,
-              color: iconColor
-            },
-            {
-              type: "text",
-              text: title,
-              font: { size: 13, weight: "semibold" },
-              textColor: { light: "#000000", dark: "#FFFFFF" }
-            }
-          ]
-        },
-        buildMetricRow("5小时", groupData.h5),
-        buildMetricRow("周额度", groupData.weekly)
-      ]
-    };
-  }
-
-  const isSmall = family === "systemSmall" || family === "accessoryRectangular";
-
-  return {
-    type: "widget",
-    padding: isSmall ? 12 : 14,
-    backgroundColor: { light: "#FFFFFF", dark: "#000000" },
-    gap: 8,
-    children: [
-      // 头部 Title
-      {
-        type: "stack",
-        direction: "row",
-        alignItems: "center",
-        gap: 6,
-        children: [
-          {
-            type: "image",
-            src: "sf-symbol:sparkles",
-            width: 14,
-            height: 14,
-            color: "#4285F4"
-          },
-          {
-            type: "text",
-            text: "Antigravity",
-            font: { size: 13, weight: "bold" },
-            textColor: { light: "#000000", dark: "#FFFFFF" }
-          },
-          { type: "spacer" },
-          {
-            type: "date",
-            date: new Date().toISOString(),
-            format: "time",
-            font: { size: 10 },
-            textColor: { light: "#8E8E93", dark: "#636366" }
-          }
-        ]
-      },
-      // 内容区域：根据尺寸自适应（小组件垂直堆叠，中/大组件水平并排）
-      {
-        type: "stack",
-        direction: isSmall ? "column" : "row",
-        gap: 8,
-        flex: 1,
-        children: [
-          buildGroupCard("Claude", "cpu", "#D97706", claude),
-          buildGroupCard("Gemini", "sparkle", "#4285F4", gemini)
-        ]
-      }
-    ]
-  };
-}
-
-// 错误展示 DSL
-function buildErrorWidget(msg) {
-  return {
-    type: "widget",
-    padding: 14,
-    backgroundColor: { light: "#FFFFFF", dark: "#000000" },
-    gap: 6,
-    children: [
-      {
-        type: "stack",
-        direction: "row",
-        alignItems: "center",
-        gap: 6,
-        children: [
-          {
-            type: "image",
-            src: "sf-symbol:exclamationmark.triangle.fill",
-            width: 14,
-            height: 14,
-            color: "#FF3B30"
-          },
-          {
-            type: "text",
-            text: "Antigravity 错误",
-            font: { size: 13, weight: "bold" },
-            textColor: "#FF3B30"
-          }
-        ]
-      },
-      { type: "spacer" },
-      {
-        type: "text",
-        text: msg,
-        font: { size: 12 },
-        textColor: { light: "#666666", dark: "#999999" },
-        maxLines: 3
-      },
-      { type: "spacer" }
-    ]
-  };
-}
-
-// 主逻辑执行器
-async function run(ctx = {}) {
-  // 获取 refresh_token：优先从 ctx.env，其次从持久化存储 $persistentStore
-  let refreshToken = (ctx.env && ctx.env.REFRESH_TOKEN) || "";
-  if (!refreshToken && typeof $persistentStore !== "undefined") {
-    refreshToken = $persistentStore.read(REFRESH_TOKEN_KEY) || "";
-  }
-
-  if (!refreshToken) {
-    const errMsg = "未找到 refresh_token，请在持久化存储中设置 antigravity_refresh_token";
-    if (typeof $notification !== "undefined") {
-      $notification.post("Antigravity 额度", "缺少凭证", errMsg);
-    }
-    return buildErrorWidget("缺少凭据，请在 Egern 设置中配置 antigravity_refresh_token");
-  }
-
-  try {
-    const accessToken = await fetchAccessToken(refreshToken, ctx.http);
-    if (!accessToken) {
-      throw new Error("刷新 Access Token 失败，请检查 refresh_token 是否失效");
-    }
-
-    const quotaSummary = await fetchQuotaSummary(accessToken, ctx.http);
-    const quotaData = parseQuotaData(quotaSummary);
-
-    // 如果处于 Schedule 定时通知模式
-    if (typeof $notification !== "undefined" && (!ctx || !ctx.widgetFamily)) {
-      const c = quotaData.claude;
-      const g = quotaData.gemini;
-      const content = [
-        `🤖 Claude: 5h ${c.h5.pct}% (${c.h5.resetStr || "正常"}) | 周 ${c.weekly.pct}%`,
-        `✨ Gemini: 5h ${g.h5.pct}% (${g.h5.resetStr || "正常"}) | 周 ${g.weekly.pct}%`
-      ].join("\n");
-      $notification.post("Antigravity 额度状态", "", content);
-    }
-
-    // 返回 Widget DSL
-    return buildWidgetDSL(quotaData, ctx.widgetFamily || "systemMedium");
-  } catch (err) {
-    const errMsg = err.message || String(err);
-    if (typeof $notification !== "undefined" && (!ctx || !ctx.widgetFamily)) {
-      $notification.post("Antigravity 额度检查失败", "", errMsg);
-    }
-    return buildErrorWidget(errMsg);
-  }
-}
-
-// 统一导出（Egern 小组件要求 export default async function(ctx)）
-export default async function(ctx) {
-  return await run(ctx);
-}
-
-// 兼容纯脚本直接运行上下文（非 ES Module 环境）
-if (typeof $done !== "undefined" && typeof module === "undefined") {
-  run().then((res) => {
-    $done(res);
-  }).catch((err) => {
-    $done({ error: err.message });
+    body: bodyParams
   });
+
+  const data = await resp.json();
+  if (!data.access_token) {
+    throw new Error(data.error_description || data.error || "Token 刷新失败");
+  }
+  return data.access_token;
+}
+
+/**
+ * 查询配额汇总
+ */
+async function fetchQuotaSummary(ctx, accessToken) {
+  const resp = await (ctx.http ? ctx.http.post : fetch)('https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+      'User-Agent': 'antigravity-cli/0.1.0'
+    },
+    body: '{}'
+  });
+
+  const data = await resp.json();
+  if (data.error) {
+    throw new Error(data.error.message || "配额接口返回错误");
+  }
+  return data;
+}
+
+/**
+ * 解析配额分组
+ */
+function parseQuotas(data) {
+  const groups = data.quotaGroups || [];
+  
+  let claudeGroup = null;
+  let geminiGroup = null;
+
+  for (const g of groups) {
+    const name = (g.name || '').toLowerCase();
+    if (name.includes('claude') || name.includes('3p')) {
+      claudeGroup = g;
+    } else if (name.includes('gemini')) {
+      geminiGroup = g;
+    }
+  }
+
+  return {
+    claude: extractGroupQuota(claudeGroup, "Claude / 3P"),
+    gemini: extractGroupQuota(geminiGroup, "Gemini")
+  };
+}
+
+function extractGroupQuota(group, defaultTitle) {
+  if (!group || !group.quotas) {
+    return {
+      title: defaultTitle,
+      h5: { percent: 100, resetText: "—" },
+      weekly: { percent: 100, resetText: "—" }
+    };
+  }
+
+  let h5 = { percent: 100, resetText: "—" };
+  let weekly = { percent: 100, resetText: "—" };
+
+  for (const q of group.quotas) {
+    const dur = (q.duration || '').toLowerCase();
+    const frac = q.remainingFraction != null ? q.remainingFraction : 1.0;
+    const pct = Math.round(frac * 100);
+    const resetTime = q.resetTime ? formatResetTime(q.resetTime) : "—";
+
+    if (dur.includes('18000s') || dur.includes('5h')) {
+      h5 = { percent: pct, resetText: resetTime };
+    } else if (dur.includes('604800s') || dur.includes('7d') || dur.includes('week')) {
+      weekly = { percent: pct, resetText: resetTime };
+    }
+  }
+
+  return {
+    title: defaultTitle,
+    h5: h5,
+    weekly: weekly
+  };
+}
+
+function formatResetTime(isoStr) {
+  try {
+    const target = new Date(isoStr).getTime();
+    const now = Date.now();
+    const diff = target - now;
+    if (diff <= 0) return "已重置";
+    const mins = Math.floor(diff / (1000 * 60));
+    const hours = Math.floor(mins / 60);
+    const remMins = mins % 60;
+    const days = Math.floor(hours / 24);
+    const remHours = hours % 24;
+
+    if (days > 0) return `${days}天${remHours}h`;
+    if (hours > 0) return `${hours}h${remMins}m`;
+    return `${mins}m`;
+  } catch (e) {
+    return "—";
+  }
+}
+
+/**
+ * Canvas 离屏绘制
+ */
+async function renderCanvasWidget(parsed, isSmall) {
+  const W = isSmall ? 180 : 380;
+  const H = 180;
+  const DPR = 3;
+
+  const canvas = new OffscreenCanvas(W * DPR, H * DPR);
+  const cx = canvas.getContext('2d');
+  cx.setTransform(1, 0, 0, 1, 0, 0);
+  cx.scale(DPR, DPR);
+
+  // 背景：现代深色质感
+  const bgGrad = cx.createLinearGradient(0, 0, W, H);
+  bgGrad.addColorStop(0, '#13151b');
+  bgGrad.addColorStop(1, '#1a1d26');
+  cx.fillStyle = bgGrad;
+  cx.fillRect(0, 0, W, H);
+
+  // 装饰微光
+  const glowGrad = cx.createRadialGradient(W / 2, -20, 10, W / 2, 50, W);
+  glowGrad.addColorStop(0, 'rgba(66, 133, 244, 0.12)');
+  glowGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  cx.fillStyle = glowGrad;
+  cx.fillRect(0, 0, W, H);
+
+  const SYS = '-apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+  const MONO = '"SF Mono", Menlo, monospace';
+
+  if (isSmall) {
+    // ----------------------------------------
+    // Small 尺寸 (180x180) 紧凑精美卡片
+    // ----------------------------------------
+    // Header
+    cx.fillStyle = '#8e9aa8';
+    cx.font = '600 12px ' + SYS;
+    cx.textAlign = 'left';
+    cx.fillText("ANTIGRAVITY", 16, 26);
+
+    const nowStr = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    cx.textAlign = 'right';
+    cx.font = '500 10px ' + MONO;
+    cx.fillStyle = '#5c6675';
+    cx.fillText(nowStr, W - 16, 26);
+
+    // Claude 条目
+    drawCompactCard(cx, 16, 38, W - 32, 58, "Claude 3P", parsed.claude, '#d97706');
+
+    // Gemini 条目
+    drawCompactCard(cx, 16, 104, W - 32, 58, "Gemini", parsed.gemini, '#2563eb');
+
+  } else {
+    // ----------------------------------------
+    // Medium 尺寸 (380x180) 左右双列仪表盘
+    // ----------------------------------------
+    // Header
+    cx.fillStyle = '#8e9aa8';
+    cx.font = '600 13px ' + SYS;
+    cx.textAlign = 'left';
+    cx.fillText("ANTIGRAVITY QUOTA", 20, 26);
+
+    const nowStr = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    cx.textAlign = 'right';
+    cx.font = '500 11px ' + MONO;
+    cx.fillStyle = '#64748b';
+    cx.fillText("更新于 " + nowStr, W - 20, 26);
+
+    const colW = (W - 40 - 14) / 2; // 两列宽度
+    const colH = 126;
+    const startY = 38;
+
+    // 左列：Claude / 3P
+    drawMediumColumn(cx, 20, startY, colW, colH, "Claude / 3P", parsed.claude, '#ea580c');
+
+    // 右列：Gemini
+    drawMediumColumn(cx, 20 + colW + 14, startY, colW, colH, "Gemini", parsed.gemini, '#3b82f6');
+  }
+
+  // 导出 PNG Data URI
+  const blob = await canvas.convertToBlob({ type: 'image/png' });
+  const buf = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  }
+  return 'data:image/png;base64,' + btoa(binary);
+}
+
+/**
+ * 绘制 Medium 卡片单列
+ */
+function drawMediumColumn(cx, x, y, w, h, title, data, themeColor) {
+  const SYS = '-apple-system, system-ui, sans-serif';
+  const MONO = '"SF Mono", Menlo, monospace';
+
+  // 容器卡片底色
+  cx.fillStyle = 'rgba(255, 255, 255, 0.04)';
+  roundRect(cx, x, y, w, h, 12);
+  cx.fill();
+
+  // 边框
+  cx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
+  cx.lineWidth = 1;
+  cx.stroke();
+
+  // 顶部指示条
+  cx.fillStyle = themeColor;
+  roundRectTop(cx, x, y, w, 3, 12);
+  cx.fill();
+
+  // 标题
+  cx.font = '600 13px ' + SYS;
+  cx.fillStyle = '#f1f5f9';
+  cx.textAlign = 'left';
+  cx.fillText(title, x + 12, y + 24);
+
+  // 5小时额度行
+  drawQuotaRow(cx, x + 12, y + 40, w - 24, "5小时", data.h5.percent, data.h5.resetText);
+
+  // 分割微线
+  cx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+  cx.beginPath();
+  cx.moveTo(x + 12, y + 78);
+  cx.lineTo(x + w - 12, y + 78);
+  cx.stroke();
+
+  // 周额度行
+  drawQuotaRow(cx, x + 12, y + 86, w - 24, "周额度", data.weekly.percent, data.weekly.resetText);
+}
+
+/**
+ * 绘制额度数据行（带进度条）
+ */
+function drawQuotaRow(cx, x, y, w, label, pct, resetText) {
+  const SYS = '-apple-system, system-ui, sans-serif';
+  const MONO = '"SF Mono", Menlo, monospace';
+
+  // 标签
+  cx.font = '500 11px ' + SYS;
+  cx.fillStyle = '#94a3b8';
+  cx.textAlign = 'left';
+  cx.fillText(label, x, y + 12);
+
+  // 百分比数值 + 颜色
+  const color = getPercentColor(pct);
+  cx.font = '700 13px ' + MONO;
+  cx.fillStyle = color;
+  cx.textAlign = 'right';
+  cx.fillText(pct + "%", x + w, y + 12);
+
+  // 进度槽
+  const barY = y + 18;
+  const barH = 5;
+  cx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+  roundRect(cx, x, barY, w, barH, 3);
+  cx.fill();
+
+  // 进度填充条
+  const fillW = Math.max(4, Math.round(w * (pct / 100)));
+  cx.fillStyle = color;
+  roundRect(cx, x, barY, fillW, barH, 3);
+  cx.fill();
+
+  // 重置时间
+  cx.font = '400 9px ' + SYS;
+  cx.fillStyle = '#64748b';
+  cx.textAlign = 'left';
+  cx.fillText(`重置: ${resetText}`, x, y + 33);
+}
+
+/**
+ * Small 紧凑型卡片
+ */
+function drawCompactCard(cx, x, y, w, h, title, data, themeColor) {
+  const SYS = '-apple-system, system-ui, sans-serif';
+  const MONO = '"SF Mono", Menlo, monospace';
+
+  // 底色
+  cx.fillStyle = 'rgba(255, 255, 255, 0.04)';
+  roundRect(cx, x, y, w, h, 10);
+  cx.fill();
+
+  // 左侧强调色边条
+  cx.fillStyle = themeColor;
+  roundRectLeft(cx, x, y, 3, h, 10);
+  cx.fill();
+
+  // 标题
+  cx.font = '600 11px ' + SYS;
+  cx.fillStyle = '#e2e8f0';
+  cx.textAlign = 'left';
+  cx.fillText(title, x + 10, y + 16);
+
+  // 5小时额度简写
+  const c5 = getPercentColor(data.h5.percent);
+  cx.font = '600 11px ' + MONO;
+  cx.fillStyle = c5;
+  cx.textAlign = 'right';
+  cx.fillText(`${data.h5.percent}%`, x + w - 8, y + 16);
+
+  // 5h 进度条
+  const barY = y + 22;
+  const barW = w - 18;
+  cx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+  roundRect(cx, x + 10, barY, barW, 4, 2);
+  cx.fill();
+
+  cx.fillStyle = c5;
+  roundRect(cx, x + 10, barY, Math.max(3, barW * (data.h5.percent / 100)), 4, 2);
+  cx.fill();
+
+  // 周额度与时间
+  const cw = getPercentColor(data.weekly.percent);
+  cx.font = '400 9px ' + SYS;
+  cx.fillStyle = '#94a3b8';
+  cx.textAlign = 'left';
+  cx.fillText("周: " + data.weekly.percent + "%", x + 10, y + 42);
+
+  cx.textAlign = 'right';
+  cx.font = '400 9px ' + SYS;
+  cx.fillStyle = '#64748b';
+  cx.fillText(data.h5.resetText, x + w - 8, y + 42);
+}
+
+function getPercentColor(pct) {
+  if (pct >= 50) return '#10b981'; // 绿
+  if (pct >= 20) return '#f59e0b'; // 黄
+  return '#ef4444'; // 红
+}
+
+function roundRect(cx, x, y, w, h, r) {
+  cx.beginPath();
+  cx.moveTo(x + r, y);
+  cx.arcTo(x + w, y, x + w, y + h, r);
+  cx.arcTo(x + w, y + h, x, y + h, r);
+  cx.arcTo(x, y + h, x, y, r);
+  cx.arcTo(x, y, x + w, y, r);
+  cx.closePath();
+}
+
+function roundRectTop(cx, x, y, w, h, r) {
+  cx.beginPath();
+  cx.moveTo(x + r, y);
+  cx.lineTo(x + w - r, y);
+  cx.arcTo(x + w, y, x + w, y + h, r);
+  cx.lineTo(x + w, y + h);
+  cx.lineTo(x, y + h);
+  cx.lineTo(x, y + r);
+  cx.arcTo(x, y, x + r, y, r);
+  cx.closePath();
+}
+
+function roundRectLeft(cx, x, y, w, h, r) {
+  cx.beginPath();
+  cx.moveTo(x, y + r);
+  cx.arcTo(x, y, x + w, y, r);
+  cx.lineTo(x + w, y);
+  cx.lineTo(x + w, y + h);
+  cx.lineTo(x, y + h);
+  cx.arcTo(x, y + h, x, y + h - r, r);
+  cx.closePath();
+}
+
+/**
+ * 错误提示卡片
+ */
+async function renderErrorWidget(title, subtitle) {
+  const W = 380, H = 180, DPR = 3;
+  const canvas = new OffscreenCanvas(W * DPR, H * DPR);
+  const cx = canvas.getContext('2d');
+  cx.scale(DPR, DPR);
+
+  cx.fillStyle = '#1c1917';
+  cx.fillRect(0, 0, W, H);
+
+  cx.fillStyle = '#ef4444';
+  cx.font = 'bold 15px -apple-system, sans-serif';
+  cx.textAlign = 'center';
+  cx.fillText(title, W / 2, H / 2 - 8);
+
+  cx.fillStyle = '#a8a29e';
+  cx.font = '12px -apple-system, sans-serif';
+  cx.fillText(subtitle, W / 2, H / 2 + 16);
+
+  const blob = await canvas.convertToBlob({ type: 'image/png' });
+  const buf = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  }
+  const dataUri = 'data:image/png;base64,' + btoa(binary);
+
+  return {
+    type: 'widget',
+    backgroundImage: dataUri,
+    padding: 0,
+    children: []
+  };
 }
