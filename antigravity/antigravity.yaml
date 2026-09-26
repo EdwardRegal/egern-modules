@@ -1,24 +1,20 @@
-name: "Antigravity 额度查询"
-description: "自动抓取 Antigravity IDE (Google AI Pro 账号) 凭据并定时监控 Gemini / Claude 等模型剩余额度及重置时间。"
+name: "Antigravity 额度组件"
+description: "监控 Antigravity (Google AI Pro) 账号的 Claude 与 Gemini 5小时额度与周额度。"
 author: "EdwardRegal"
 icon: https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/antigravity/antigravity.png
 
 scriptings:
-  # 1. 凭证抓取：当 Antigravity IDE 请求 Google 内部后端时自动捕获 OAuth Bearer Token 与 Project ID
-  - http_request:
-      name: "Antigravity 凭证抓取"
-      match: ^https?:\/\/cloudcode-pa\.googleapis\.com\/v1internal:(fetchAvailableModels|generateCode|chat)
+  # 1. 桌面组件/应用面板 (Panel)：点击即时刷新展示
+  - panel:
+      name: "Antigravity 配额"
+      title: "Antigravity Quota"
+      content: "点击刷新配额数据"
       script_url: https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/antigravity/antigravity_quota.js
-      body_required: true
+      update_interval: 1800
 
-  # 2. 定时任务：每 2 小时自动查询各模型 Quota 并在通知中心推送剩余百分比与重置时间
+  # 2. 定时通知任务 (Schedule)：每 2 小时推送一次
   - schedule:
       name: "Antigravity 额度检查"
       cron: 0 0 */2 * * *
       script_url: https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/antigravity/antigravity_quota.js
       timeout: 60
-
-mitm:
-  hostnames:
-    includes:
-      - cloudcode-pa.googleapis.com

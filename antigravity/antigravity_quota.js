@@ -3,9 +3,10 @@
  * Author: EdwardRegal
  * 
  * 功能：
- * 1. 自动利用配置好的 Refresh Token 向 Google OAuth 刷新长期凭据；
- * 2. 请求 cloudcode-pa.googleapis.com 获取 Antigravity/Google AI Pro 的实时额度；
- * 3. 格式化输出 Gemini 与 Claude 等模型的剩余百分比与重置时间并发送系统通知。
+ * 1. 利用 Refresh Token 自动向 Google OAuth 换取 Access Token；
+ * 2. 请求 cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary 获取配额分组；
+ * 3. 提取 Gemini 和 Claude/第三方模型分组的「5小时额度」与「周额度」；
+ * 4. 支持 Egern Panel (组件面板) 与定时通知 (Schedule)。
  */
 
 const CLIENT_ID = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com";
@@ -46,9 +47,7 @@ function refreshToken(refreshTokenValue) {
         body: body
       },
       (error, response, data) => {
-        if (error) {
-          return reject(error);
-        }
+        if (error) return reject(error);
         try {
           const res = JSON.parse(data);
           if (res.access_token) {
@@ -64,9 +63,9 @@ function refreshToken(refreshTokenValue) {
   });
 }
 
-function fetchModelsQuota(accessToken) {
+function fetchQuotaSummary(accessToken) {
   return new Promise((resolve, reject) => {
-    const url = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
+    const url = "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary";
     $httpClient.post(
       {
         url: url,
@@ -78,9 +77,7 @@ function fetchModelsQuota(accessToken) {
         body: JSON.stringify({})
       },
       (error, response, data) => {
-        if (error) {
-          return reject(error);
-        }
+        if (error) return reject(error);
         try {
           const res = JSON.parse(data);
           resolve(res);
@@ -98,9 +95,14 @@ function formatRelativeReset(resetTimeStr) {
     const resetDate = new Date(resetTimeStr);
     const now = new Date();
     const diffMs = resetDate.getTime() - now.getTime();
-    if (diffMs <= 0) return "即将重置";
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    if (diffMs <= 0) return "已重置";
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    const diffHours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
     const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+
+    if (diffDays > 0) {
+      return `${diffDays}天${diffHours}小时后重置`;
+    }
     if (diffHours > 0) {
       return `${diffHours}小时${diffMins}分后重置`;
     }
@@ -110,105 +112,138 @@ function formatRelativeReset(resetTimeStr) {
   }
 }
 
+function getProgressIcon(percent) {
+  if (percent <= 20) return "🔴";
+  if (percent <= 50) return "🟡";
+  return "🟢";
+}
+
 async function main() {
-  const isHttp = typeof $request !== "undefined";
+  const isPanel = typeof $panel !== "undefined";
 
-  // 1. 如果通过网络请求拦截捕获了 Bearer token
-  if (isHttp) {
-    const authHeader = $request.headers["Authorization"] || $request.headers["authorization"];
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      const token = authHeader.replace("Bearer ", "").trim();
-      setStore("antigravity_access_token", token);
-      notify("Antigravity 凭证抓取成功", "已保存当前会话 Access Token", "定时检查将直接使用该凭证查询额度");
-    }
-    return $done({});
-  }
-
-  // 2. 定时 / 面板执行查询
   try {
     let accessToken = getStore("antigravity_access_token");
     const refreshTokenValue = getStore("antigravity_refresh_token");
 
-    // 若配置了长效 refresh_token，直接换取最新的 access_token
     if (refreshTokenValue) {
       try {
         accessToken = await refreshToken(refreshTokenValue);
         setStore("antigravity_access_token", accessToken);
       } catch (err) {
-        console.log("Refresh token failed, fallback to cached access token: " + err);
+        console.log("Token refresh failed: " + err);
       }
     }
 
     if (!accessToken) {
-      notify(
-        "Antigravity 额度查询未就绪",
-        "未找到登录凭据",
-        "请在 Egern 设置中写入 antigravity_refresh_token 持久化变量。"
-      );
+      const errMsg = "未找到凭据，请在 Persistent Store 填入 antigravity_refresh_token";
+      if (isPanel) {
+        $panel.set({
+          title: "Antigravity Quota",
+          content: errMsg,
+          icon: "exclamationmark.triangle"
+        });
+      } else {
+        notify("Antigravity 额度", "未配置凭据", errMsg);
+      }
       return $done({});
     }
 
-    let quotaData = await fetchModelsQuota(accessToken);
+    let res = await fetchQuotaSummary(accessToken);
 
-    // 如果 401 且有 refresh_token，再次尝试刷新
-    if (quotaData.error && quotaData.error.code === 401 && refreshTokenValue) {
+    if (res.error && res.error.code === 401 && refreshTokenValue) {
       accessToken = await refreshToken(refreshTokenValue);
       setStore("antigravity_access_token", accessToken);
-      quotaData = await fetchModelsQuota(accessToken);
+      res = await fetchQuotaSummary(accessToken);
     }
 
-    if (quotaData.error) {
-      notify("Antigravity 查询失败", `API 错误 (${quotaData.error.code})`, quotaData.error.message);
+    if (res.error) {
+      const errDetail = res.error.message || `Code ${res.error.code}`;
+      if (isPanel) {
+        $panel.set({
+          title: "Antigravity Quota",
+          content: `查询失败: ${errDetail}`,
+          icon: "xmark.circle"
+        });
+      } else {
+        notify("Antigravity 查询失败", "API 报错", errDetail);
+      }
       return $done({});
     }
 
-    const rawModels = quotaData.models || {};
-    const modelList = Array.isArray(rawModels)
-      ? rawModels
-      : Object.keys(rawModels).map((k) => Object.assign({ id: k }, rawModels[k]));
+    const groups = res.groups || [];
+    let claudeInfo = { h5: null, weekly: null };
+    let geminiInfo = { h5: null, weekly: null };
 
-    const quotaList = [];
-    for (const m of modelList) {
-      const q = m.quotaInfo;
-      if (q && typeof q.remainingFraction !== "undefined") {
-        const percent = Math.round(q.remainingFraction * 100);
-        const name = m.displayName || m.name || m.id;
-        const resetDesc = formatRelativeReset(q.resetTime);
-        quotaList.push({
-          name: name,
-          percent: percent,
-          resetDesc: resetDesc,
-          resetTime: q.resetTime
-        });
+    for (const g of groups) {
+      const name = (g.displayName || "").toLowerCase();
+      const isClaudeGroup = name.includes("claude") || name.includes("gpt");
+      const isGeminiGroup = name.includes("gemini");
+      const target = isClaudeGroup ? claudeInfo : isGeminiGroup ? geminiInfo : null;
+
+      if (!target) continue;
+
+      for (const b of g.buckets || []) {
+        const fraction = typeof b.remainingFraction === "number" ? b.remainingFraction : 1;
+        const percent = Math.round(fraction * 100);
+        const resetDesc = formatRelativeReset(b.resetTime);
+        const data = { percent, resetDesc, icon: getProgressIcon(percent) };
+
+        if (b.window === "5h") {
+          target.h5 = data;
+        } else if (b.window === "weekly") {
+          target.weekly = data;
+        }
       }
     }
 
-    if (quotaList.length === 0) {
-      notify("Antigravity 额度状态", "未获取到模型配额信息", "当前账号无活动配额或模型列表为空");
-      return $done({});
+    // 构建展示文本
+    const lines = [];
+
+    // Claude / 3P
+    if (claudeInfo.h5 || claudeInfo.weekly) {
+      lines.push("🤖 Claude / 3P");
+      if (claudeInfo.h5) {
+        lines.push(`  ${claudeInfo.h5.icon} 5小时: ${claudeInfo.h5.percent}% (${claudeInfo.h5.resetDesc})`);
+      }
+      if (claudeInfo.weekly) {
+        lines.push(`  ${claudeInfo.weekly.icon} 周额度: ${claudeInfo.weekly.percent}% (${claudeInfo.weekly.resetDesc})`);
+      }
     }
 
-    // 优先显示 Claude 和主力 Gemini
-    const primaryKeywords = ["Claude", "Gemini 3.1 Pro", "Gemini 3.7", "Gemini 3.6 Flash"];
-    quotaList.sort((a, b) => {
-      const aIsPri = primaryKeywords.some((k) => a.name.includes(k));
-      const bIsPri = primaryKeywords.some((k) => b.name.includes(k));
-      if (aIsPri && !bIsPri) return -1;
-      if (!aIsPri && bIsPri) return 1;
-      return a.percent - b.percent;
-    });
+    // Gemini
+    if (geminiInfo.h5 || geminiInfo.weekly) {
+      if (lines.length > 0) lines.push("");
+      lines.push("✨ Gemini");
+      if (geminiInfo.h5) {
+        lines.push(`  ${geminiInfo.h5.icon} 5小时: ${geminiInfo.h5.percent}% (${geminiInfo.h5.resetDesc})`);
+      }
+      if (geminiInfo.weekly) {
+        lines.push(`  ${geminiInfo.weekly.icon} 周额度: ${geminiInfo.weekly.percent}% (${geminiInfo.weekly.resetDesc})`);
+      }
+    }
 
-    const lines = quotaList.slice(0, 5).map((item) => {
-      let icon = "🟢";
-      if (item.percent <= 20) icon = "🔴";
-      else if (item.percent <= 50) icon = "🟡";
-      return `${icon} ${item.name}: ${item.percent}% (${item.resetDesc || "正常"})`;
-    });
+    const outputContent = lines.join("\n");
 
-    const summaryText = lines.join("\n");
-    notify("Antigravity 额度状态", `已监控 ${quotaList.length} 个模型`, summaryText);
-  } catch (err) {
-    notify("Antigravity 查询异常", "执行失败", String(err && err.message ? err.message : err));
+    if (isPanel) {
+      $panel.set({
+        title: "Antigravity Quota",
+        content: outputContent,
+        icon: "sparkles"
+      });
+    } else {
+      notify("Antigravity 额度状态", "Claude & Gemini 配额概览", outputContent);
+    }
+  } catch (e) {
+    const errStr = String(e && e.message ? e.message : e);
+    if (isPanel) {
+      $panel.set({
+        title: "Antigravity Quota",
+        content: `运行出错: ${errStr}`,
+        icon: "exclamationmark.circle"
+      });
+    } else {
+      notify("Antigravity 异常", "执行失败", errStr);
+    }
   } finally {
     $done({});
   }
