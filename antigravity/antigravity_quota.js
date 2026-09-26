@@ -54,8 +54,11 @@ function nativeQuota(label, item, accent, small) {
   const trackHeight = small ? 4 : 6;
   const track = { type: 'stack', direction: 'row', width: trackWidth, height: trackHeight,
     borderRadius: trackHeight / 2, backgroundColor: COLOR.track,
-    children: percent ? [{ type: 'stack', width: trackWidth * percent / 100,
-      height: trackHeight, borderRadius: trackHeight / 2, backgroundColor: color, children: [] }] : [] };
+    children: percent ? [
+      { type: 'stack', width: trackWidth * percent / 100,
+        height: trackHeight, borderRadius: trackHeight / 2, backgroundColor: color, children: [] },
+      { type: 'spacer' }
+    ] : [] };
   return { type: 'stack', direction: 'column', alignItems: 'start', gap: small ? 1 : 4, children: [
     { type: 'stack', direction: 'row', alignItems: 'center', gap: 4,
       children: [

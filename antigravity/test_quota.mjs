@@ -53,10 +53,12 @@ for (const family of ['systemSmall', 'systemMedium']) {
     assert.equal(track.width, family === 'systemSmall' ? 100 : 116);
     assert.deepEqual(Object.keys(track.backgroundColor).sort(), ['dark', 'light']);
     const value = Number.parseInt(row.children[0].children[2].text, 10);
-    assert.equal(track.children.length, value === 0 ? 0 : 1);
+    assert.equal(track.children.length, value === 0 ? 0 : 2);
     if (value > 0) {
       assert.equal(track.children[0].width, track.width * value / 100);
       assert.equal(track.children[0].height, track.height);
+      assert.equal(track.children[1].type, 'spacer');
+      assert.equal(track.children[1].length, undefined);
     }
   }
 }
