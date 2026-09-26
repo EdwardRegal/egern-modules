@@ -47,14 +47,14 @@ for (const family of ['systemSmall', 'systemMedium']) {
   for (const card of cards) for (const row of card.children.slice(1)) {
     assert.equal(row.children[0].children[2].maxLines, 1);
     const track = row.children[1];
-    assert.equal(track.height, 6);
+    assert.equal(track.height, family === 'systemSmall' ? 4 : 6);
     assert.equal(track.width, family === 'systemSmall' ? 100 : 116);
     assert.deepEqual(Object.keys(track.backgroundColor).sort(), ['dark', 'light']);
     const value = Number.parseInt(row.children[0].children[2].text, 10);
     assert.equal(track.children.length, value === 0 ? 0 : 1);
     if (value > 0) {
       assert.equal(track.children[0].width, track.width * value / 100);
-      assert.equal(track.children[0].height, 6);
+      assert.equal(track.children[0].height, track.height);
     }
   }
 }

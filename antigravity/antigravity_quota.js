@@ -51,38 +51,39 @@ function nativeQuota(label, item, accent, small) {
     value < 50 ? COLOR.mid : accent;
   const percent = value == null ? 0 : Math.max(0, Math.min(100, value));
   const trackWidth = small ? 100 : 116;
-  const track = { type: 'stack', direction: 'row', width: trackWidth, height: 6,
-    borderRadius: 3, backgroundColor: COLOR.track,
+  const trackHeight = small ? 4 : 6;
+  const track = { type: 'stack', direction: 'row', width: trackWidth, height: trackHeight,
+    borderRadius: trackHeight / 2, backgroundColor: COLOR.track,
     children: percent ? [{ type: 'stack', width: trackWidth * percent / 100,
-      height: 6, borderRadius: 3, backgroundColor: color, children: [] }] : [] };
-  return { type: 'stack', direction: 'column', gap: 4, children: [
+      height: trackHeight, borderRadius: trackHeight / 2, backgroundColor: color, children: [] }] : [] };
+  return { type: 'stack', direction: 'column', gap: small ? 1 : 4, children: [
     { type: 'stack', direction: 'row', alignItems: 'center', gap: 4,
       children: [
-        nativeText(label, 11, COLOR.muted, 'semibold'),
+        nativeText(label, small ? 9 : 11, COLOR.muted, 'semibold'),
         { type: 'spacer' },
-        nativeText(percentText(value), 16, color, 'bold')
+        nativeText(percentText(value), small ? 11 : 16, color, 'bold')
       ] },
     track
   ] };
 }
 
 function nativeCard(title, data, accent, small) {
-  return { type: 'stack', direction: 'column', flex: 1, gap: small ? 4 : 8,
-    padding: small ? [7, 9, 7, 9] : [11, 10, 11, 10],
+  return { type: 'stack', direction: 'column', flex: 1, gap: small ? 2 : 8,
+    padding: small ? [5, 8, 5, 8] : [11, 10, 11, 10],
     borderRadius: 8, borderWidth: 1,
     borderColor: adaptive('#ffffffdd', '#ffffff32'),
     backgroundGradient: { type: 'linear', ...GRADIENT_POINTS,
       colors: [adaptive('#ffffffed', '#293d58ee'),
         adaptive('#e8f1fae3', '#202f47df'), adaptive('#dce7f4e8', '#18263de9')] },
     children: [
-      nativeText(title, 12, COLOR.body, 'bold'),
+      nativeText(title, small ? 11 : 12, COLOR.body, 'bold'),
       nativeQuota('5h', data.h5, accent, small),
       nativeQuota('Weekly', data.weekly, accent, small)
     ] };
 }
 
 function nativeWidget(data, small, error) {
-  const children = [nativeText('ANTIGRAVITY', 12, COLOR.title, 'bold')];
+  const children = [nativeText('ANTIGRAVITY', small ? 10 : 12, COLOR.title, 'bold')];
   if (error) {
     children.push(nativeText(error[0], 15, COLOR.error, 'bold'));
     children.push(nativeText(error[1], 11, COLOR.subtle));
@@ -95,7 +96,7 @@ function nativeWidget(data, small, error) {
         nativeCard('Gemini', data.gemini, COLOR.gemini, false)] });
   }
   return { type: 'widget', refreshAfter: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-    padding: small ? 10 : 12, gap: small ? 5 : 9,
+    padding: small ? 8 : 12, gap: small ? 3 : 9,
     backgroundGradient: { type: 'linear', ...GRADIENT_POINTS,
       colors: [adaptive('#c9ddfa', '#111e32'), adaptive('#edf2fb', '#1c2d46'),
         adaptive('#dbd3f6', '#2c2c4b')] }, children };
