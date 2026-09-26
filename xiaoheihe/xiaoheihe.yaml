@@ -6,13 +6,13 @@ scriptings:
   - http_request:
       name: "小黑盒凭据抓取"
       match: ^https?:\/\/(api|data)\.xiaoheihe\.cn\/.*heybox_id=
-      script_url: https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/heybox_cookie.js
+      script_url: https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/xiaoheihe/heybox_cookie.js
       body_required: false
 
   - schedule:
       name: "小黑盒每日签到"
       cron: 0 3 9,21 * * *
-      script_url: https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/heybox_task.js
+      script_url: https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/xiaoheihe/heybox_task.js
       timeout: 120
 
 mitm:
