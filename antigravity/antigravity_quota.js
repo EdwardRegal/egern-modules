@@ -33,7 +33,8 @@ const COLOR = {
   low: adaptive('#d64c61', '#ff788e'),
   mid: adaptive('#ad7420', '#ffc577'),
   claude: adaptive('#b4593e', '#ffc19d'),
-  gemini: adaptive('#3566cc', '#92b9ff')
+  gemini: adaptive('#3566cc', '#92b9ff'),
+  track: adaptive('#8295ae4d', '#a3b8d247')
 };
 const GRADIENT_POINTS = {
   startPoint: { x: 0, y: 0 }, endPoint: { x: 1, y: 1 }
@@ -48,16 +49,26 @@ function nativeQuota(label, item, accent, small) {
   const value = item.percent;
   const color = value == null ? COLOR.unknown : value < 20 ? COLOR.low :
     value < 50 ? COLOR.mid : accent;
-  return { type: 'stack', direction: 'row', alignItems: 'center', gap: small ? 6 : 8,
-    children: [
-      nativeText(label, small ? 9 : 11, COLOR.muted, 'semibold'),
-      nativeText(percentText(value), small ? 11 : 16, color, 'bold')
-    ] };
+  const percent = value == null ? 0 : Math.max(0, Math.min(100, value));
+  const trackWidth = small ? 100 : 116;
+  const trackHeight = small ? 4 : 6;
+  const track = { type: 'stack', direction: 'row', width: trackWidth, height: trackHeight,
+    borderRadius: trackHeight / 2, backgroundColor: COLOR.track,
+    children: percent ? [{ type: 'stack', width: trackWidth * percent / 100,
+      height: trackHeight, borderRadius: trackHeight / 2, backgroundColor: color, children: [] }] : [] };
+  return { type: 'stack', direction: 'column', alignItems: 'start', gap: small ? 1 : 4, children: [
+    { type: 'stack', direction: 'row', alignItems: 'center', gap: 4,
+      children: [
+        nativeText(label, small ? 9 : 11, COLOR.muted, 'semibold'),
+        { type: 'spacer' },
+        nativeText(percentText(value), small ? 11 : 16, color, 'bold')
+      ] },
+    track
+  ] };
 }
 
 function nativeCard(title, data, accent, small) {
-  return { type: 'stack', direction: 'column', alignItems: 'start', flex: 1,
-    gap: small ? 4 : 8,
+  return { type: 'stack', direction: 'column', alignItems: 'start', flex: 1, gap: small ? 2 : 8,
     padding: small ? [5, 8, 5, 8] : [11, 10, 11, 10],
     borderRadius: 8, borderWidth: 1,
     borderColor: adaptive('#ffffffdd', '#ffffff32'),
