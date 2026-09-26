@@ -1,31 +1,30 @@
 /**
- * Antigravity Quota Widget for Egern
+ * Antigravity Quota Widget for Egern (Canvas 绘制)
  * Author: EdwardRegal
  * 
- * 专为 Egern「工具 -> 脚本 -> 添加 generic 脚本」设计的小组件脚本。
- * 纯小组件渲染，零通知干扰，无需抓包。
+ * 环境变量（在小组件或脚本配置中设置）：
+ * - REFRESH_TOKEN 或 TOKEN: Antigravity (Google OAuth) 的长效 refresh_token
  * 
- * 数据展示：
- * - Claude / 3P：5小时额度百分比、周额度百分比、重置时间
- * - Gemini：5小时额度百分比、周额度百分比、重置时间
- * 
- * 支持尺寸：systemSmall（小尺寸）, systemMedium（中尺寸）
+ * 配置示例（在 Egern 脚本或 widgets 配置中）：
+ * widgets:
+ *   - name: "Antigravity 额度"
+ *     script_name: "antigravity_quota_widget"
+ *     env:
+ *       REFRESH_TOKEN: "1//06jc..."
  */
 
 export default async function(ctx) {
-  // 1. 尝试从环境变量或持久化存储中获取 refresh_token
-  let refreshToken = (ctx.env && ctx.env.REFRESH_TOKEN) || '';
-  if (!refreshToken && typeof $persistentStore !== 'undefined') {
-    refreshToken = $persistentStore.read('antigravity_refresh_token') || '';
-  }
+  // 1. 严格从环境变量 (ctx.env) 获取 refresh_token
+  const env = ctx.env || {};
+  const refreshToken = (env.REFRESH_TOKEN || env.TOKEN || env.refresh_token || '').trim();
 
-  // 若未配置 Token，渲染提示卡片
+  // 若未在环境变量配置 Token，渲染提示卡片
   if (!refreshToken) {
-    return renderErrorWidget("未配置 Token", "请在持久化存储中设置 antigravity_refresh_token");
+    return renderErrorWidget("未配置环境变量", "请在小组件/脚本环境变量中设置 REFRESH_TOKEN");
   }
 
   try {
-    // 2. 刷新 Access Token
+    // 2. 换取 Access Token
     const accessToken = await refreshAccessToken(ctx, refreshToken);
 
     // 3. 获取配额数据
@@ -86,7 +85,7 @@ async function refreshAccessToken(ctx, refreshToken) {
 }
 
 /**
- * 查询配额汇总
+ * 查询配额汇总 (仅提取汇总配额)
  */
 async function fetchQuotaSummary(ctx, accessToken) {
   const resp = await (ctx.http ? ctx.http.post : fetch)('https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary', {
@@ -107,7 +106,7 @@ async function fetchQuotaSummary(ctx, accessToken) {
 }
 
 /**
- * 解析配额分组
+ * 解析配额分组（只取 Claude/3P 与 Gemini）
  */
 function parseQuotas(data) {
   const groups = data.quotaGroups || [];
@@ -195,14 +194,14 @@ async function renderCanvasWidget(parsed, isSmall) {
   cx.setTransform(1, 0, 0, 1, 0, 0);
   cx.scale(DPR, DPR);
 
-  // 背景：现代深色质感
+  // 背景底色
   const bgGrad = cx.createLinearGradient(0, 0, W, H);
   bgGrad.addColorStop(0, '#13151b');
   bgGrad.addColorStop(1, '#1a1d26');
   cx.fillStyle = bgGrad;
   cx.fillRect(0, 0, W, H);
 
-  // 装饰微光
+  // 顶部微光
   const glowGrad = cx.createRadialGradient(W / 2, -20, 10, W / 2, 50, W);
   glowGrad.addColorStop(0, 'rgba(66, 133, 244, 0.12)');
   glowGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
@@ -214,9 +213,8 @@ async function renderCanvasWidget(parsed, isSmall) {
 
   if (isSmall) {
     // ----------------------------------------
-    // Small 尺寸 (180x180) 紧凑精美卡片
+    // Small 尺寸 (180x180)
     // ----------------------------------------
-    // Header
     cx.fillStyle = '#8e9aa8';
     cx.font = '600 12px ' + SYS;
     cx.textAlign = 'left';
@@ -228,17 +226,13 @@ async function renderCanvasWidget(parsed, isSmall) {
     cx.fillStyle = '#5c6675';
     cx.fillText(nowStr, W - 16, 26);
 
-    // Claude 条目
     drawCompactCard(cx, 16, 38, W - 32, 58, "Claude 3P", parsed.claude, '#d97706');
-
-    // Gemini 条目
     drawCompactCard(cx, 16, 104, W - 32, 58, "Gemini", parsed.gemini, '#2563eb');
 
   } else {
     // ----------------------------------------
-    // Medium 尺寸 (380x180) 左右双列仪表盘
+    // Medium 尺寸 (380x180)
     // ----------------------------------------
-    // Header
     cx.fillStyle = '#8e9aa8';
     cx.font = '600 13px ' + SYS;
     cx.textAlign = 'left';
@@ -250,18 +244,14 @@ async function renderCanvasWidget(parsed, isSmall) {
     cx.fillStyle = '#64748b';
     cx.fillText("更新于 " + nowStr, W - 20, 26);
 
-    const colW = (W - 40 - 14) / 2; // 两列宽度
+    const colW = (W - 40 - 14) / 2;
     const colH = 126;
     const startY = 38;
 
-    // 左列：Claude / 3P
     drawMediumColumn(cx, 20, startY, colW, colH, "Claude / 3P", parsed.claude, '#ea580c');
-
-    // 右列：Gemini
     drawMediumColumn(cx, 20 + colW + 14, startY, colW, colH, "Gemini", parsed.gemini, '#3b82f6');
   }
 
-  // 导出 PNG Data URI
   const blob = await canvas.convertToBlob({ type: 'image/png' });
   const buf = await blob.arrayBuffer();
   const bytes = new Uint8Array(buf);
@@ -273,119 +263,93 @@ async function renderCanvasWidget(parsed, isSmall) {
   return 'data:image/png;base64,' + btoa(binary);
 }
 
-/**
- * 绘制 Medium 卡片单列
- */
 function drawMediumColumn(cx, x, y, w, h, title, data, themeColor) {
   const SYS = '-apple-system, system-ui, sans-serif';
   const MONO = '"SF Mono", Menlo, monospace';
 
-  // 容器卡片底色
   cx.fillStyle = 'rgba(255, 255, 255, 0.04)';
   roundRect(cx, x, y, w, h, 12);
   cx.fill();
 
-  // 边框
   cx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
   cx.lineWidth = 1;
   cx.stroke();
 
-  // 顶部指示条
   cx.fillStyle = themeColor;
   roundRectTop(cx, x, y, w, 3, 12);
   cx.fill();
 
-  // 标题
   cx.font = '600 13px ' + SYS;
   cx.fillStyle = '#f1f5f9';
   cx.textAlign = 'left';
   cx.fillText(title, x + 12, y + 24);
 
-  // 5小时额度行
   drawQuotaRow(cx, x + 12, y + 40, w - 24, "5小时", data.h5.percent, data.h5.resetText);
 
-  // 分割微线
   cx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
   cx.beginPath();
   cx.moveTo(x + 12, y + 78);
   cx.lineTo(x + w - 12, y + 78);
   cx.stroke();
 
-  // 周额度行
   drawQuotaRow(cx, x + 12, y + 86, w - 24, "周额度", data.weekly.percent, data.weekly.resetText);
 }
 
-/**
- * 绘制额度数据行（带进度条）
- */
 function drawQuotaRow(cx, x, y, w, label, pct, resetText) {
   const SYS = '-apple-system, system-ui, sans-serif';
   const MONO = '"SF Mono", Menlo, monospace';
 
-  // 标签
   cx.font = '500 11px ' + SYS;
   cx.fillStyle = '#94a3b8';
   cx.textAlign = 'left';
   cx.fillText(label, x, y + 12);
 
-  // 百分比数值 + 颜色
   const color = getPercentColor(pct);
   cx.font = '700 13px ' + MONO;
   cx.fillStyle = color;
   cx.textAlign = 'right';
   cx.fillText(pct + "%", x + w, y + 12);
 
-  // 进度槽
   const barY = y + 18;
   const barH = 5;
   cx.fillStyle = 'rgba(255, 255, 255, 0.08)';
   roundRect(cx, x, barY, w, barH, 3);
   cx.fill();
 
-  // 进度填充条
   const fillW = Math.max(4, Math.round(w * (pct / 100)));
   cx.fillStyle = color;
   roundRect(cx, x, barY, fillW, barH, 3);
   cx.fill();
 
-  // 重置时间
   cx.font = '400 9px ' + SYS;
   cx.fillStyle = '#64748b';
   cx.textAlign = 'left';
   cx.fillText(`重置: ${resetText}`, x, y + 33);
 }
 
-/**
- * Small 紧凑型卡片
- */
 function drawCompactCard(cx, x, y, w, h, title, data, themeColor) {
   const SYS = '-apple-system, system-ui, sans-serif';
   const MONO = '"SF Mono", Menlo, monospace';
 
-  // 底色
   cx.fillStyle = 'rgba(255, 255, 255, 0.04)';
   roundRect(cx, x, y, w, h, 10);
   cx.fill();
 
-  // 左侧强调色边条
   cx.fillStyle = themeColor;
   roundRectLeft(cx, x, y, 3, h, 10);
   cx.fill();
 
-  // 标题
   cx.font = '600 11px ' + SYS;
   cx.fillStyle = '#e2e8f0';
   cx.textAlign = 'left';
   cx.fillText(title, x + 10, y + 16);
 
-  // 5小时额度简写
   const c5 = getPercentColor(data.h5.percent);
   cx.font = '600 11px ' + MONO;
   cx.fillStyle = c5;
   cx.textAlign = 'right';
   cx.fillText(`${data.h5.percent}%`, x + w - 8, y + 16);
 
-  // 5h 进度条
   const barY = y + 22;
   const barW = w - 18;
   cx.fillStyle = 'rgba(255, 255, 255, 0.08)';
@@ -396,7 +360,6 @@ function drawCompactCard(cx, x, y, w, h, title, data, themeColor) {
   roundRect(cx, x + 10, barY, Math.max(3, barW * (data.h5.percent / 100)), 4, 2);
   cx.fill();
 
-  // 周额度与时间
   const cw = getPercentColor(data.weekly.percent);
   cx.font = '400 9px ' + SYS;
   cx.fillStyle = '#94a3b8';
@@ -410,9 +373,9 @@ function drawCompactCard(cx, x, y, w, h, title, data, themeColor) {
 }
 
 function getPercentColor(pct) {
-  if (pct >= 50) return '#10b981'; // 绿
-  if (pct >= 20) return '#f59e0b'; // 黄
-  return '#ef4444'; // 红
+  if (pct >= 50) return '#10b981';
+  if (pct >= 20) return '#f59e0b';
+  return '#ef4444';
 }
 
 function roundRect(cx, x, y, w, h, r) {
@@ -439,7 +402,7 @@ function roundRectTop(cx, x, y, w, h, r) {
 
 function roundRectLeft(cx, x, y, w, h, r) {
   cx.beginPath();
-  cx.moveTo(x, y + r);
+  cx.moveTo(x + r, y);
   cx.arcTo(x, y, x + w, y, r);
   cx.lineTo(x + w, y);
   cx.lineTo(x + w, y + h);
@@ -448,9 +411,6 @@ function roundRectLeft(cx, x, y, w, h, r) {
   cx.closePath();
 }
 
-/**
- * 错误提示卡片
- */
 async function renderErrorWidget(title, subtitle) {
   const W = 380, H = 180, DPR = 3;
   const canvas = new OffscreenCanvas(W * DPR, H * DPR);
