@@ -86,8 +86,24 @@ function nativeCard(title, data, accent, small) {
     ] };
 }
 
+function formatRunTime() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 function nativeWidget(data, small, error) {
-  const children = [nativeText('ANTIGRAVITY', small ? 10 : 12, COLOR.title, 'bold')];
+  const headerStack = {
+    type: 'stack',
+    direction: 'row',
+    alignItems: 'center',
+    children: [
+      nativeText('ANTIGRAVITY', small ? 10 : 12, COLOR.title, 'bold'),
+      { type: 'spacer' },
+      nativeText(formatRunTime(), small ? 9 : 10, COLOR.subtle, 'medium')
+    ]
+  };
+  const children = [headerStack];
   if (error) {
     children.push(nativeText(error[0], 15, COLOR.error, 'bold'));
     children.push(nativeText(error[1], 11, COLOR.subtle));
