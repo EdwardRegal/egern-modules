@@ -111,10 +111,6 @@ async function fetchQuotaSummary(ctx, accessToken) {
 
 /**
  * 精确解析配额结构
- * API 实际返回字段为 groups[].buckets[]
- * - window: "5h" | "weekly"
- * - remainingFraction: float (如 0.3748)
- * - resetTime: ISO 字符串
  */
 function parseQuotas(data) {
   const groups = data.groups || [];
@@ -204,14 +200,14 @@ async function renderCanvasWidget(parsed, isSmall) {
 
   // 背景底色
   const bgGrad = cx.createLinearGradient(0, 0, W, H);
-  bgGrad.addColorStop(0, '#13151b');
-  bgGrad.addColorStop(1, '#1a1d26');
+  bgGrad.addColorStop(0, '#111318');
+  bgGrad.addColorStop(1, '#181b22');
   cx.fillStyle = bgGrad;
   cx.fillRect(0, 0, W, H);
 
   // 顶部微光
-  const glowGrad = cx.createRadialGradient(W / 2, -20, 10, W / 2, 50, W);
-  glowGrad.addColorStop(0, 'rgba(66, 133, 244, 0.12)');
+  const glowGrad = cx.createRadialGradient(W / 2, -10, 10, W / 2, 60, W);
+  glowGrad.addColorStop(0, 'rgba(66, 133, 244, 0.1)');
   glowGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
   cx.fillStyle = glowGrad;
   cx.fillRect(0, 0, W, H);
@@ -231,8 +227,8 @@ async function renderCanvasWidget(parsed, isSmall) {
     cx.fillStyle = '#5c6675';
     cx.fillText(nowStr, W - 16, 26);
 
-    drawCompactCard(cx, 16, 38, W - 32, 58, "Claude 3P", parsed.claude, '#d97706');
-    drawCompactCard(cx, 16, 104, W - 32, 58, "Gemini", parsed.gemini, '#2563eb');
+    drawCompactCard(cx, 16, 38, W - 32, 58, "Claude 3P", parsed.claude, '#ea580c');
+    drawCompactCard(cx, 16, 104, W - 32, 58, "Gemini", parsed.gemini, '#3b82f6');
 
   } else {
     cx.fillStyle = '#8e9aa8';
@@ -268,26 +264,41 @@ async function renderCanvasWidget(parsed, isSmall) {
 function drawMediumColumn(cx, x, y, w, h, title, data, themeColor) {
   const SYS = '-apple-system, system-ui, sans-serif';
   const MONO = '"SF Mono", Menlo, monospace';
+  const r = 12;
 
+  // 使用 save / clip / restore 机制，确保任何内部元素绝对不会溢出卡片圆角！
+  cx.save();
+  roundRect(cx, x, y, w, h, r);
+  cx.clip();
+
+  // 卡片背景
   cx.fillStyle = 'rgba(255, 255, 255, 0.04)';
-  roundRect(cx, x, y, w, h, 12);
-  cx.fill();
+  cx.fillRect(x, y, w, h);
 
-  cx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
-  cx.lineWidth = 1;
-  cx.stroke();
-
+  // 顶部一体化彩条（高度 3px，自动贴合顶部圆角无任何毛刺与尖角）
   cx.fillStyle = themeColor;
-  roundRectTop(cx, x, y, w, 3, 12);
-  cx.fill();
+  cx.fillRect(x, y, w, 3.5);
 
+  cx.restore();
+
+  // 绘制卡片精致外边框
+  cx.save();
+  cx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+  cx.lineWidth = 1;
+  roundRect(cx, x, y, w, h, r);
+  cx.stroke();
+  cx.restore();
+
+  // 卡片标题
   cx.font = '600 13px ' + SYS;
   cx.fillStyle = '#f1f5f9';
   cx.textAlign = 'left';
   cx.fillText(title, x + 12, y + 24);
 
+  // 5小时与周额度行
   drawQuotaRow(cx, x + 12, y + 40, w - 24, "5小时", data.h5.percent, data.h5.resetText);
 
+  // 分割线
   cx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
   cx.beginPath();
   cx.moveTo(x + 12, y + 78);
@@ -332,14 +343,26 @@ function drawQuotaRow(cx, x, y, w, label, pct, resetText) {
 function drawCompactCard(cx, x, y, w, h, title, data, themeColor) {
   const SYS = '-apple-system, system-ui, sans-serif';
   const MONO = '"SF Mono", Menlo, monospace';
+  const r = 10;
+
+  cx.save();
+  roundRect(cx, x, y, w, h, r);
+  cx.clip();
 
   cx.fillStyle = 'rgba(255, 255, 255, 0.04)';
-  roundRect(cx, x, y, w, h, 10);
-  cx.fill();
+  cx.fillRect(x, y, w, h);
 
   cx.fillStyle = themeColor;
-  roundRectLeft(cx, x, y, 3, h, 10);
-  cx.fill();
+  cx.fillRect(x, y, 3.5, h);
+
+  cx.restore();
+
+  cx.save();
+  cx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+  cx.lineWidth = 1;
+  roundRect(cx, x, y, w, h, r);
+  cx.stroke();
+  cx.restore();
 
   cx.font = '600 11px ' + SYS;
   cx.fillStyle = '#e2e8f0';
@@ -387,29 +410,6 @@ function roundRect(cx, x, y, w, h, r) {
   cx.arcTo(x + w, y + h, x, y + h, r);
   cx.arcTo(x, y + h, x, y, r);
   cx.arcTo(x, y, x + w, y, r);
-  cx.closePath();
-}
-
-function roundRectTop(cx, x, y, w, h, r) {
-  cx.beginPath();
-  cx.moveTo(x + r, y);
-  cx.lineTo(x + w - r, y);
-  cx.arcTo(x + w, y, x + w, y + h, r);
-  cx.lineTo(x + w, y + h);
-  cx.lineTo(x, y + h);
-  cx.lineTo(x, y + r);
-  cx.arcTo(x, y, x + r, y, r);
-  cx.closePath();
-}
-
-function roundRectLeft(cx, x, y, w, h, r) {
-  cx.beginPath();
-  cx.moveTo(x, y + r);
-  cx.arcTo(x, y, x + w, y, r);
-  cx.lineTo(x + w, y);
-  cx.lineTo(x + w, y + h);
-  cx.lineTo(x, y + h);
-  cx.arcTo(x, y + h, x, y + h - r, r);
   cx.closePath();
 }
 
