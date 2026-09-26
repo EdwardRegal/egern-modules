@@ -1,0 +1,51 @@
+#!name = 小黑盒日常签到与任务 (本地免托管版)
+#!desc = 小黑盒每日自动签到、做任务（分享/浏览榜单），以及自动抓取 Cookie 凭据。无需 GitHub 托管，脚本直嵌模块。
+#!author = cjy, modified for Egern
+#!category = 签到
+
+scriptings:
+  - http_request:
+      name: 小黑盒凭据抓取
+      match: ^https?:\/\/(api|data)\.xiaoheihe\.cn\/.*heybox_id=
+      code: |
+        const KEY_COOKIE = "BLACKBOX_COOKIE";
+        const url = $request.url;
+        const headers = $request.headers || {};
+        const idMatch = url.match(/[?&]heybox_id=([^&#]+)/);
+        if (!idMatch) { $done({}); return; }
+        const heyboxId = idMatch[1];
+        const cookieHeader = headers["Cookie"] || headers["cookie"] || "";
+        const pkeyMatch = cookieHeader.match(/(?:^|;\s*)pkey=([^;]+)/);
+        const tokenMatch = cookieHeader.match(/(?:^|;\s*)x_xhh_tokenid=([^;]+)/);
+        if (!pkeyMatch || !tokenMatch) { $done({}); return; }
+        const pkey = pkeyMatch[1];
+        const tokenId = tokenMatch[1];
+        const newAccountStr = `${heyboxId}#pkey=${pkey};x_xhh_tokenid=${tokenId}`;
+        let currentVal = $persistentStore.read(KEY_COOKIE) || "";
+        let accounts = currentVal ? currentVal.split("&").filter(Boolean) : [];
+        let existsIndex = accounts.findIndex(acc => acc.startsWith(`${heyboxId}#`));
+        let isUpdate = false;
+        if (existsIndex !== -1) {
+          if (accounts[existsIndex] === newAccountStr) { $done({}); return; }
+          accounts[existsIndex] = newAccountStr;
+          isUpdate = true;
+        } else {
+          accounts.push(newAccountStr);
+        }
+        const savedVal = accounts.join("&");
+        if ($persistentStore.write(savedVal, KEY_COOKIE)) {
+          $notification.post("小黑盒 Cookie 获取成功", isUpdate ? `更新: ${heyboxId}` : `新增: ${heyboxId}`, `共 ${accounts.length} 个账号已存储`);
+        }
+        $done({});
+      body_required: false
+
+  - cron:
+      name: 小黑盒每日签到
+      cron: 3 3 9,21 * * *
+      script_url: https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/heybox_task.js
+      timeout: 120
+
+mitm:
+  hostnames:
+    - api.xiaoheihe.cn
+    - data.xiaoheihe.cn
