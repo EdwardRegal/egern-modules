@@ -7,5 +7,5 @@ scriptings:
   - schedule:
       name: "Apple 固件更新检查"
       cron: 0 0 9,21 * * *
-      script_url: https://cdn.jsdelivr.net/gh/EdwardRegal/egern-modules@21234d2216684d39ba1119e97556b2179ddfbbf2/apple-update/check_update.js
+      script_url: https://cdn.jsdelivr.net/gh/EdwardRegal/egern-modules@47a2d1e08554c24b929275922d524f054936ac1f/apple-update/check_update.js
       timeout: 30
