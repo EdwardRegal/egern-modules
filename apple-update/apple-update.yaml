@@ -1,0 +1,11 @@
+name: "Apple 系统更新监控"
+description: "定时监控 Apple iOS 官方最新正式版系统更新，发布时即时发送 Egern 本地通知及 Bark 推送。"
+author: "EdwardRegal"
+icon: apple.logo
+
+scriptings:
+  - schedule:
+      name: "Apple 固件更新检查"
+      cron: 0 0 9,21 * * *
+      script_url: https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/apple-update/check_update.js
+      timeout: 30
