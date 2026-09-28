@@ -4,8 +4,8 @@
  * 支持本地系统通知与可选 Bark 远程推送
  */
 
-// 默认监控设备 (iPhone 16 Pro: iPhone17,1; iPhone 15 Pro: iPhone16,1; iPhone 16: iPhone17,3)
-const DEFAULT_DEVICE = "iPhone17,1";
+// 默认监控设备 (iPhone 16 Pro Max: iPhone17,2; iPhone 16 Pro: iPhone17,1)
+const DEFAULT_DEVICE = "iPhone17,2";
 const STORAGE_KEY = "last_known_apple_fw_build";
 
 // Bark 推送配置
