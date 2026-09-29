@@ -1,0 +1,22 @@
+name: "LOLI Labs 自动签到"
+description: "自动抓取 LOLI Labs (loli.host) 登录凭据，每日定时签到并推送资产通知。"
+author: "EdwardRegal"
+icon: sparkles
+
+scriptings:
+  - http_request:
+      name: "LOLI Labs Token 抓取"
+      match: ^https?:\/\/labs-api\.loli\.host\/api\/v1\/(account\/profile|wallet|signin)
+      script_url: https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/loli-host/loli_token.js
+      body_required: false
+
+  - schedule:
+      name: "LOLI Labs 每日签到"
+      cron: 0 15 9 * * *
+      script_url: https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/loli-host/loli_task.js
+      timeout: 60
+
+mitm:
+  hostnames:
+    includes:
+      - labs-api.loli.host
