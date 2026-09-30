@@ -1,22 +1,43 @@
 name: "AgentRouter 自动签到"
-description: "每日 09:00 自动登录 ps.air-outer.com 执行签到，查询余额与消耗；支持 Safari 登录时自动抓取凭据，或在脚本中手动填写账号。"
+description: "每日 09:00 自动登录 ps.air-outer.com 执行签到，查询奖励、余额与累计消耗。"
 author: "773075692, MaYIHEI, adapted for Egern by EdwardRegal"
+homepage: "https://ps.air-outer.com"
 icon: https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/agentrouter/icon.png
 
-scriptings:
-  - http_request:
-      name: "AgentRouter 凭据抓取"
-      match: ^https?:\/\/ps\.air-outer\.com\/api\/user\/login
-      script_url: https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/agentrouter/agentrouter_cookie.js
-      body_required: true
+compat_arguments:
+  USERNAME: ""
+  PASSWORD: ""
+  ACCOUNTS: ""
+  DEBUG: "false"
 
+env_schema:
+  USERNAME:
+    name: 账号
+    description: 网站账号或邮箱
+    default_value: ""
+  PASSWORD:
+    name: 密码
+    description: 网站登录密码
+    default_value: ""
+  ACCOUNTS:
+    name: 多账号（JSON）
+    description: 选填；填写后优先使用列表；格式见说明
+    default_value: ""
+  DEBUG:
+    name: 调试模式
+    description: 仅记录请求状态和签到判定
+    options:
+      - "false"
+      - "true"
+
+scriptings:
   - schedule:
       name: "AgentRouter 每日签到"
       cron: 0 0 9 * * *
       script_url: https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/agentrouter/agentrouter_task.js
+      env:
+        USERNAME: "{{{USERNAME}}}"
+        PASSWORD: "{{{PASSWORD}}}"
+        ACCOUNTS: "{{{ACCOUNTS}}}"
+        DEBUG: "{{{DEBUG}}}"
       timeout: 120
-
-mitm:
-  hostnames:
-    includes:
-      - ps.air-outer.com

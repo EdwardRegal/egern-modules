@@ -2,13 +2,13 @@
  * AgentRouter 每日定时签到 (Egern 适配版)
  * 目标站点: https://ps.air-outer.com
  *
- * 账号配置（二选一）：
- * 1. 自动抓取（推荐）：开启 Egern 模块与 MitM，在浏览器登录 https://ps.air-outer.com 一次即可自动保存凭据。
- * 2. 手动填写：直接在下方 CONFIG_USERNAME 与 CONFIG_PASSWORD 填入账号和密码（已自动抓取则留空）。
+ * 账号配置：
+ * 在 Egern 模块设置中直接填写账号与密码（支持单账号及多账号 JSON 数组）。
+ * 也可在下方 CONFIG_USERNAME / CONFIG_PASSWORD 手动写死。
  */
 
-const CONFIG_USERNAME = ""; // 可选：手动填写账号或邮箱
-const CONFIG_PASSWORD = ""; // 可选：手动填写密码
+const CONFIG_USERNAME = ""; // 可选：手动写死账号
+const CONFIG_PASSWORD = ""; // 可选：手动写死密码
 
 const $ = new Env("AgentRouter");
 const BASE_URL = "https://ps.air-outer.com";
@@ -26,7 +26,7 @@ run().catch((error) => {
 async function run() {
     const accounts = readAccounts();
     if (!accounts.length) {
-        $.msg($.name, "🚫 未配置账号", "请在手机浏览器登录 https://ps.air-outer.com 自动抓取凭据，或在脚本中填写账号与密码");
+        $.msg($.name, "🚫 未配置账号", "请在 Egern 模块设置中填写账号与密码");
         return;
     }
 
@@ -60,8 +60,42 @@ async function run() {
     }
 }
 
+function getEnvVal(key) {
+    if (typeof ctx !== "undefined" && ctx && ctx.env && ctx.env[key] !== undefined && ctx.env[key] !== "") {
+        return String(ctx.env[key]);
+    }
+    if (typeof $env !== "undefined" && $env && $env[key] !== undefined && $env[key] !== "") {
+        return String($env[key]);
+    }
+    if (typeof $environment !== "undefined" && $environment && $environment[key] !== undefined && $environment[key] !== "") {
+        return String($environment[key]);
+    }
+    if (typeof $argument !== "undefined" && $argument) {
+        if (typeof $argument === "object" && $argument[key] !== undefined && $argument[key] !== "") {
+            return String($argument[key]);
+        }
+        if (typeof $argument === "string") {
+            try {
+                const parsed = JSON.parse($argument);
+                if (parsed && parsed[key] !== undefined && parsed[key] !== "") {
+                    return String(parsed[key]);
+                }
+            } catch (_) {}
+            const match = $argument.match(new RegExp(`(?:^|[&,])${key}=([^&,]+)`));
+            if (match) return decodeURIComponent(match[1]);
+        }
+    }
+    return "";
+}
+
 function readAccounts() {
-    const multi = ($.getdata(ACCOUNTS_KEY) || "").trim();
+    let multi = (
+        getEnvVal("ACCOUNTS") ||
+        $.getdata(ACCOUNTS_KEY) ||
+        ""
+    ).trim();
+    if (multi === "{{{ACCOUNTS}}}") multi = "";
+
     if (multi) {
         let accounts;
         try {
@@ -81,8 +115,22 @@ function readAccounts() {
         });
     }
 
-    const username = (CONFIG_USERNAME || $.getdata(USER_KEY) || "").trim();
-    const password = CONFIG_PASSWORD || $.getdata(PASSWORD_KEY) || "";
+    let username = (
+        getEnvVal("USERNAME") ||
+        CONFIG_USERNAME ||
+        $.getdata(USER_KEY) ||
+        ""
+    ).trim();
+    if (username === "{{{USERNAME}}}") username = "";
+
+    let password = (
+        getEnvVal("PASSWORD") ||
+        CONFIG_PASSWORD ||
+        $.getdata(PASSWORD_KEY) ||
+        ""
+    );
+    if (password === "{{{PASSWORD}}}") password = "";
+
     return username && password ? [{ username, password }] : [];
 }
 
@@ -100,7 +148,7 @@ async function checkin({ username, password }, quotaUnit) {
 
     if (login.json.success !== true) {
         const msg = login.json.message || "账号密码错误或触发安全验证";
-        return { title: "❌ 登录失败", content: `请先在浏览器打开 ${BASE_URL} 确认账号密码及是否需要验证码 (${msg})` };
+        return { title: "❌ 登录失败", content: `请确认账号密码是否正确 (${msg})` };
     }
 
     const data = login.json.data;
@@ -226,7 +274,7 @@ function request(method, path, headers, body, label) {
             try {
                 json = JSON.parse(text);
             } catch (_) {
-                reject(new Error(`${label}返回非 JSON 内容（可能触发了阿里云 WAF 滑块验证，请将 ps.air-outer.com 设置为 DIRECT 直连）`));
+                reject(new Error(`${label}返回非 JSON 内容（若触发阿里云 WAF 滑块验证，请将 ps.air-outer.com 设置为 DIRECT 直连）`));
                 return;
             }
             if (!json || typeof json !== "object" || Array.isArray(json)) {
@@ -239,7 +287,9 @@ function request(method, path, headers, body, label) {
 }
 
 function debug(message) {
-    if ($.getdata(DEBUG_KEY) === "true") $.log(`[DEBUG] ${message}`);
+    const d = getEnvVal("DEBUG");
+    const isD = (d === "true" || d === "1" || $.getdata(DEBUG_KEY) === "true");
+    if (isD) $.log(`[DEBUG] ${message}`);
 }
 
 function Env(s) {

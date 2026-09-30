@@ -6,7 +6,7 @@
 
 | 模块名称 | 描述 | 模块链接 |
 | :--- | :--- | :--- |
-| **AgentRouter 自动签到** | 自动抓取或配置账号，每日 09:00 自动登录 ps.air-outer.com 签到并查询余额/消耗 | [查看配置](https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/agentrouter/agentrouter.yaml) |
+| **AgentRouter 自动签到** | 模块设置直接填写账号密码，每日 09:00 自动登录 ps.air-outer.com 签到并查询余额/消耗 | [查看配置](https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/agentrouter/agentrouter.yaml) |
 | **LOLI Labs 自动签到** | 自动抓取 LOLI Labs (loli.host) Token，每日定时签到并推送资产通知 | [查看配置](https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/loli-host/loli-host.yaml) |
 | **GLaDOS / Railgun** | 自动抓取站点 Cookie，每日定时签到与自动兑换 | [查看配置](https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/glados/glados.yaml) |
 | **QQ音乐** | QQ音乐相关处理脚本 | [查看配置](https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/qqmusic/) |
