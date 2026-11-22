@@ -13,6 +13,7 @@
 | **小黑盒** | 小黑盒签到/任务脚本 | [查看配置](https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/xiaoheihe/) |
 | **Antigravity** | Antigravity 模块 | [查看配置](https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/antigravity/) |
 | **Apple Update** | 阻止 iOS / iPadOS 系统自动更新描述文件/规则 | [查看配置](https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/apple-update/) |
+| **QQ 农场登录 Code** | 打开 QQ 农场小程序自动抓取一次性登录 Code，可通知复制或直接提交面板建号 | [查看配置](https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/qqfarm/qqfarm.yaml) |
 
 ## 使用方式
 

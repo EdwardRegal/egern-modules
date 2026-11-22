@@ -1,0 +1,48 @@
+# QQ 农场 Egern 模块：抓取登录 Code
+#
+# 安装：Egern → 配置 → 模块 → 右上角 + → 从 URL 导入，填
+#   https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/qqfarm/qqfarm.yaml
+# 或直接点：egern:/modules/new?url=https%3A%2F%2Fraw.githubusercontent.com%2FEdwardRegal%2Fegern-modules%2Fmain%2Fqqfarm%2Fqqfarm.yaml
+#
+# 前提：
+#   1. Egern 已生成并安装根证书（工具 → 证书 → 生成新证书 → 安装新证书），
+#      并在 iOS「设置 → 通用 → 关于本机 → 证书信任设置」里开启完全信任；
+#   2. 模块启用后 MITM 会解密 *.nqf.qq.com。
+#
+# 参数（模块详情页 → 编辑参数）：
+#   AUTO_ADD=1 时直接用抓到的 Code 调面板 /api/accounts 建号并启动；
+#   需要同时填 PANEL_URL、PANEL_TOKEN（面板请求头 x-admin-token 的值）。
+#   不填则只发通知，点通知把 Code 复制到剪贴板，再手动粘贴到面板「添加账号 → Code」。
+
+name: "QQ 农场登录 Code 抓取"
+description: "打开 QQ 农场小程序时自动抓取一次性登录 Code：通知复制，或直接提交面板建号"
+author: "EdwardRegal"
+
+scriptings:
+  - http_request:
+      name: "QQ农场 Code 抓取"
+      # ws 升级请求与普通 https 请求的 URL 前缀都覆盖
+      match: "^(?:https?|wss?)://(?:[^/?#]+\\.)?nqf\\.qq\\.com/"
+      script_url: "https://raw.githubusercontent.com/EdwardRegal/egern-modules/main/qqfarm/qqfarm.js"
+      timeout: 15
+      env:
+        AUTO_ADD: "0"
+        PANEL_URL: ""
+        PANEL_TOKEN: ""
+        ACCOUNT_NAME: ""
+
+# 网关流量直连，避免长连接绕远路
+rules:
+  - domain_suffix:
+      match: "nqf.qq.com"
+      policy: DIRECT
+
+# 解密目标域名，脚本才能看到 wss 地址里的 code
+mitm:
+  hostnames:
+    - "*.nqf.qq.com"
+    - "nqf.qq.com"
+
+# 兜底：若脚本没触发，可在「HTTP 抓包」里手动查看 ws 请求地址
+http_captures:
+  - "*.nqf.qq.com"
